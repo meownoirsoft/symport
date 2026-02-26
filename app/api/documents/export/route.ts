@@ -5,7 +5,6 @@ import type { DocumentKind } from "@/lib/document-schemas";
 
 type DocRow = {
   id: string;
-  status: string;
   tags: string[];
   extractedData: Record<string, unknown>;
   createdAt: Date;
@@ -29,7 +28,6 @@ function flattenForCsv(doc: DocRow): Record<string, string> {
   return {
     id: doc.id,
     title,
-    status: doc.status,
     tags: Array.isArray(doc.tags) ? doc.tags.join("; ") : "",
     created_at: doc.createdAt ? new Date(doc.createdAt).toISOString() : "",
     date,
@@ -58,8 +56,8 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const format = searchParams.get("format")?.toLowerCase();
   const q = searchParams.get("q")?.trim();
-  const status = searchParams.get("status")?.trim();
   const tag = searchParams.get("tag")?.trim();
+  const category = searchParams.get("category")?.trim();
 
   if (format !== "csv" && format !== "json" && format !== "schema.org") {
     return NextResponse.json({ error: "format must be csv, json, or schema.org" }, { status: 400 });
@@ -67,28 +65,33 @@ export async function GET(request: Request) {
 
   const where: {
     searchText?: { contains: string; mode: "insensitive" };
-    status?: string;
     tags?: { has: string };
   } = {};
   if (q) where.searchText = { contains: q, mode: "insensitive" };
-  if (status) where.status = status;
   if (tag) where.tags = { has: tag };
 
-  const docs = await prisma.document.findMany({
+  let docs = await prisma.document.findMany({
     where,
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
-      status: true,
       tags: true,
       extractedData: true,
       createdAt: true,
     },
   });
 
+  if (category) {
+    const { getCategoryForTag } = await import("@/lib/document-categories");
+    const { readCategoryOverrides } = await import("@/lib/category-overrides");
+    const overrides = readCategoryOverrides();
+    docs = docs.filter((doc) =>
+      (doc.tags ?? []).some((t) => getCategoryForTag(String(t), overrides) === category)
+    );
+  }
+
   const payload = docs.map((doc) => ({
     id: doc.id,
-    status: doc.status,
     tags: doc.tags ?? [],
     extractedData: doc.extractedData as Record<string, unknown>,
     createdAt: doc.createdAt.toISOString(),

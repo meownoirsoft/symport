@@ -71,7 +71,6 @@ type Doc = {
   id: string;
   imagePath: string | null;
   noteText: string | null;
-  status: string;
   rotation?: number;
   tags?: string[];
   extractedData: Record<string, unknown>;
@@ -79,13 +78,10 @@ type Doc = {
   createdAt: string;
 };
 
-const STATUS_OPTIONS = ["pending", "paid", "unpaid", "submitted", "reimbursed", "not_eligible"];
-
 export default function DocumentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const [id, setId] = useState<string | null>(null);
   const [doc, setDoc] = useState<Doc | null>(null);
-  const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [rotation, setRotation] = useState(0);
@@ -120,7 +116,6 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       .then((r) => r.json())
       .then((d: Doc) => {
         setDoc(d);
-        setStatus(d.status);
         if (typeof d.rotation === "number") setRotation(d.rotation);
         setTitle(
           typeof (d.extractedData as Record<string, unknown>)?.title === "string"
@@ -131,22 +126,6 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
         setExtractionNotes(d.extractionNotes ?? "");
       });
   }, [id]);
-
-  async function handleStatusChange(newStatus: string) {
-    if (!id || saving) return;
-    setSaving(true);
-    try {
-      await fetch(`/api/documents/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      setStatus(newStatus);
-      if (doc) setDoc({ ...doc, status: newStatus });
-    } finally {
-      setSaving(false);
-    }
-  }
 
   function displayTitle(data: Record<string, unknown>): string {
     if (typeof data.title === "string" && data.title.trim()) return data.title.trim();
@@ -319,7 +298,6 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       if (!res.ok) throw new Error(await res.text());
       const updated = (await res.json()) as Doc;
       setDoc(updated);
-      setStatus(updated.status);
       setTitle(
         typeof (updated.extractedData as Record<string, unknown>)?.title === "string"
           ? (updated.extractedData as Record<string, unknown>).title as string
@@ -643,20 +621,6 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             </div>
           </div>
         )}
-
-        <div>
-          <label className="block text-sm font-medium text-zinc-500 mb-2">Status</label>
-          <select
-            value={status}
-            onChange={(e) => handleStatusChange(e.target.value)}
-            disabled={saving}
-            className="w-full rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-3"
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
 
         <div>
           <label className="block text-sm font-medium text-zinc-500 mb-2">Tags</label>

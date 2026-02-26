@@ -44,7 +44,6 @@ export async function PATCH(
 ) {
   const { id } = await params;
   const body = await request.json();
-  const status = typeof body.status === "string" ? body.status.trim() : undefined;
   const rotation = normalizeRotation(body.rotation);
   const extractionNotes =
     body.extractionNotes === null || body.extractionNotes === undefined
@@ -66,14 +65,12 @@ export async function PATCH(
         : undefined;
 
   const data: {
-    status?: string;
     rotation?: number;
     extractionNotes?: string | null;
     extractedData?: Record<string, unknown>;
     searchText?: string | null;
     tags?: string[];
   } = {};
-  if (status !== undefined) data.status = status;
   if (rotation !== undefined) data.rotation = rotation;
   if (extractionNotes !== undefined) data.extractionNotes = extractionNotes;
   if (tags !== undefined) data.tags = tags;
@@ -90,7 +87,7 @@ export async function PATCH(
   }
 
   if (Object.keys(data).length === 0) {
-    return NextResponse.json({ error: "Provide status, rotation, extractionNotes, title, and/or tags" }, { status: 400 });
+    return NextResponse.json({ error: "Provide rotation, extractionNotes, title, and/or tags" }, { status: 400 });
   }
 
   const doc = await prisma.document.update({

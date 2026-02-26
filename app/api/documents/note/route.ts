@@ -26,7 +26,7 @@ export async function POST(request: Request) {
           summary: "Extraction skipped (no OPENAI_API_KEY)",
         },
         searchText: text.slice(0, 500),
-        tags: [],
+        tags: ["note"],
       },
       });
       return NextResponse.json({ id: doc.id });
@@ -52,7 +52,8 @@ export async function POST(request: Request) {
   }
 
   const searchText = buildSearchText(extractedData as ExtractedDoc);
-  const tags = normalizeTags(extractedData.tags);
+  const extractedTags = normalizeTags(extractedData.tags);
+  const tags = extractedTags.includes("note") ? extractedTags : [...extractedTags, "note"];
 
   const jsonForDb = JSON.parse(JSON.stringify(extractedData)) as Prisma.InputJsonValue;
 
