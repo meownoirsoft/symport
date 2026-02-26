@@ -30,7 +30,6 @@ export async function POST(request: Request) {
     await prisma.document.create({
       data: {
         imagePath: filename,
-        documentType: "general",
         status: "pending",
         extractedData: { type: "general", title: "Document", summary: "Extraction skipped (no OPENAI_API_KEY)" },
         searchText: "Extraction skipped",
@@ -55,14 +54,12 @@ export async function POST(request: Request) {
     };
   }
 
-  const documentType = (extractedData.type as string) ?? "general";
   const searchText = buildSearchText(extractedData as ExtractedDoc);
   const tags = normalizeTags(extractedData.tags);
 
   const doc = await prisma.document.create({
     data: {
       imagePath: filename,
-      documentType,
       status: "pending",
       extractedData: extractedData as Prisma.InputJsonValue,
       searchText: searchText || null,

@@ -69,8 +69,8 @@ function PrettyJson({ data, depth = 0 }: { data: unknown; depth?: number }) {
 
 type Doc = {
   id: string;
-  imagePath: string;
-  documentType: string;
+  imagePath: string | null;
+  noteText: string | null;
   status: string;
   rotation?: number;
   tags?: string[];
@@ -97,12 +97,14 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [savingTags, setSavingTags] = useState(false);
+  const [retagging, setRetagging] = useState(false);
   const [extractionNotes, setExtractionNotes] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
   const [reExtracting, setReExtracting] = useState(false);
   const [cropModalOpen, setCropModalOpen] = useState(false);
   const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
   const [savingCrop, setSavingCrop] = useState(false);
+  const [savingSharpen, setSavingSharpen] = useState(false);
   const [imageKey, setImageKey] = useState(0);
   const cropModalCropperRef = useRef<ReactCropperElement>(null);
   const panStart = useRef({ x: 0, y: 0 });
@@ -187,7 +189,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
   }
 
   function addTag() {
-    const t = tagInput.trim().toLowerCase().replace(/\s+/g, "_");
+    const t = tagInput.trim().replace(/\s+/g, "_");
     if (!t || tags.includes(t)) {
       setTagInput("");
       return;
@@ -202,6 +204,25 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     const next = tags.filter((x) => x !== tag);
     setTags(next);
     saveTags(next);
+  }
+
+  async function handleRetag() {
+    if (!id || retagging) return;
+    setRetagging(true);
+    try {
+      const res = await fetch(`/api/documents/${id}/retag`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || res.statusText);
+      }
+      const updated = (await res.json()) as Doc;
+      setDoc(updated);
+      setTags(Array.isArray(updated.tags) ? [...updated.tags] : []);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Retag failed");
+    } finally {
+      setRetagging(false);
+    }
   }
 
   async function handleDelete() {
@@ -318,6 +339,20 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     setCropModalOpen(true);
   }
 
+  async function handleSharpen() {
+    if (!id || savingSharpen) return;
+    setSavingSharpen(true);
+    try {
+      const res = await fetch(`/api/documents/${id}/image/sharpen`, { method: "POST" });
+      if (!res.ok) throw new Error(await res.text());
+      setImageKey((k) => k + 1);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Sharpen failed");
+    } finally {
+      setSavingSharpen(false);
+    }
+  }
+
   async function saveCropAndClose() {
     const cropper = cropModalCropperRef.current?.cropper;
     if (!id || !cropper) return;
@@ -394,43 +429,61 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
         </div>
       </header>
       <main className="max-w-4xl mx-auto px-4 py-4 flex flex-col gap-6">
-        <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800">
-          <div className="relative flex items-center justify-center min-h-[40vh]" style={{ transform: `rotate(${rotation}deg)` }}>
-            <img
-              src={`/api/documents/${doc.id}/image?t=${imageKey}`}
-              alt="Document"
-              className="w-full object-contain max-h-[60vh] cursor-zoom-in"
-              onClick={openLightbox}
-            />
+        {doc.imagePath ? (
+          <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800">
+            <div className="relative flex items-center justify-center min-h-[40vh]" style={{ transform: `rotate(${rotation}deg)` }}>
+              <img
+                src={`/api/documents/${doc.id}/image?t=${imageKey}`}
+                alt="Document"
+                className="w-full object-contain max-h-[60vh] cursor-zoom-in"
+                onClick={openLightbox}
+              />
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2 py-2 px-2 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/80">
+              <button
+                type="button"
+                onClick={rotateLeft}
+                className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                aria-label="Rotate left"
+              >
+                ↶ Rotate left
+              </button>
+              <button
+                type="button"
+                onClick={rotateRight}
+                className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                aria-label="Rotate right"
+              >
+                Rotate right ↷
+              </button>
+              <button
+                type="button"
+                onClick={openCropModal}
+                className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                aria-label="Crop image"
+              >
+                Crop image
+              </button>
+              <button
+                type="button"
+                onClick={handleSharpen}
+                disabled={savingSharpen}
+                className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+                aria-label="Sharpen image"
+              >
+                {savingSharpen ? "…" : "Sharpen"}
+              </button>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">Click image to zoom</span>
+            </div>
           </div>
-          <div className="flex items-center justify-center gap-2 py-2 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/80">
-            <button
-              type="button"
-              onClick={rotateLeft}
-              className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              aria-label="Rotate left"
-            >
-              ↶ Rotate left
-            </button>
-            <button
-              type="button"
-              onClick={rotateRight}
-              className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              aria-label="Rotate right"
-            >
-              Rotate right ↷
-            </button>
-            <button
-              type="button"
-              onClick={openCropModal}
-              className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              aria-label="Crop image"
-            >
-              Crop image
-            </button>
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">Click image to zoom</span>
+        ) : doc.noteText ? (
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/80 p-5">
+            <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Note</p>
+            <pre className="whitespace-pre-wrap font-sans text-sm text-zinc-800 dark:text-zinc-200 max-h-[50vh] overflow-auto">
+              {doc.noteText}
+            </pre>
           </div>
-        </div>
+        ) : null}
 
         {cropModalOpen && cropImageUrl && (
           <div
@@ -442,8 +495,9 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             <p className="text-sm text-zinc-400 px-4 pt-4 shrink-0">
               Drag the crop box to move; drag corners or edges to resize. Any ratio is fine.
             </p>
-            <div className="relative flex-1 min-h-0">
+            <div className="relative w-full h-[70vh] min-h-[300px]">
               <Cropper
+                key={cropImageUrl}
                 ref={cropModalCropperRef}
                 src={cropImageUrl}
                 style={{ height: "100%", width: "100%" }}
@@ -454,6 +508,9 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                 autoCropArea={0.8}
               />
             </div>
+            <p className="text-xs text-zinc-500 px-4 py-1 shrink-0">
+              If the crop area doesn’t appear, try re-importing (capture again and replace image).
+            </p>
             <div className="p-4 border-t border-zinc-700 flex gap-2">
               <button
                 type="button"
@@ -641,6 +698,15 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
               className="rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
             >
               Add
+            </button>
+            <button
+              type="button"
+              onClick={handleRetag}
+              disabled={retagging}
+              className="rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+              title="Re-run AI to suggest tags again"
+            >
+              {retagging ? "Retagging…" : "Retag"}
             </button>
           </div>
         </div>

@@ -1,14 +1,32 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { deleteUploadFile } from "@/lib/uploads";
+import { buildSearchText, type ExtractedDoc } from "@/lib/extract";
+import { toSchemaOrgJsonLd } from "@/lib/document-schemas";
+import type { DocumentKind } from "@/lib/document-schemas";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const { searchParams } = new URL(request.url);
+  const format = searchParams.get("format")?.toLowerCase();
+
   const doc = await prisma.document.findUnique({ where: { id } });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  if (format === "schema.org") {
+    const data = (doc.extractedData ?? {}) as Record<string, unknown>;
+    const kind = (data.doc_category as DocumentKind) ?? "general";
+    const jsonLd = toSchemaOrgJsonLd(data, kind);
+    return new NextResponse(JSON.stringify(jsonLd, null, 2), {
+      headers: {
+        "Content-Type": "application/ld+json",
+      },
+    });
+  }
+
   return NextResponse.json(doc);
 }
 
@@ -44,7 +62,7 @@ export async function PATCH(
     body.tags === null || body.tags === undefined
       ? undefined
       : Array.isArray(body.tags)
-        ? body.tags.map((t: unknown) => String(t).trim().toLowerCase().replace(/\s+/g, "_")).filter(Boolean)
+        ? body.tags.map((t: unknown) => String(t).trim().replace(/\s+/g, "_")).filter(Boolean)
         : undefined;
 
   const data: {
@@ -52,6 +70,7 @@ export async function PATCH(
     rotation?: number;
     extractionNotes?: string | null;
     extractedData?: Record<string, unknown>;
+    searchText?: string | null;
     tags?: string[];
   } = {};
   if (status !== undefined) data.status = status;
@@ -59,11 +78,15 @@ export async function PATCH(
   if (extractionNotes !== undefined) data.extractionNotes = extractionNotes;
   if (tags !== undefined) data.tags = tags;
 
-  if (title !== undefined) {
+  if (title !== undefined || tags !== undefined) {
     const existing = await prisma.document.findUnique({ where: { id }, select: { extractedData: true } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
     const current = (existing.extractedData as Record<string, unknown>) ?? {};
-    data.extractedData = { ...current, title: title || null };
+    const merged = { ...current };
+    if (title !== undefined) merged.title = title || null;
+    if (tags !== undefined) merged.tags = tags;
+    data.extractedData = merged;
+    data.searchText = buildSearchText(merged as ExtractedDoc) || null;
   }
 
   if (Object.keys(data).length === 0) {
@@ -85,7 +108,7 @@ export async function DELETE(
   const doc = await prisma.document.findUnique({ where: { id } });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  deleteUploadFile(doc.imagePath);
+  if (doc.imagePath) deleteUploadFile(doc.imagePath);
   await prisma.document.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }

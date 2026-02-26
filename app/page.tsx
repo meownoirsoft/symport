@@ -16,6 +16,12 @@ export default function Home() {
             Capture document
           </Link>
           <Link
+            href="/note"
+            className="flex items-center justify-center gap-2 rounded-xl border border-zinc-300 dark:border-zinc-600 py-4 px-6 font-medium"
+          >
+            Add note
+          </Link>
+          <Link
             href="/documents"
             className="flex items-center justify-center gap-2 rounded-xl border border-zinc-300 dark:border-zinc-600 py-4 px-6 font-medium"
           >

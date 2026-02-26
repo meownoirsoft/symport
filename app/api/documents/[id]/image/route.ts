@@ -12,6 +12,7 @@ export async function GET(
   const { id } = await params;
   const doc = await prisma.document.findUnique({ where: { id } });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!doc.imagePath) return NextResponse.json({ error: "No image (note document)" }, { status: 404 });
 
   const stream = readUploadStream(doc.imagePath);
   if (!stream) return NextResponse.json({ error: "File not found" }, { status: 404 });
@@ -32,6 +33,7 @@ export async function PUT(
   const { id } = await params;
   const doc = await prisma.document.findUnique({ where: { id } });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!doc.imagePath) return NextResponse.json({ error: "Cannot replace image on a note document" }, { status: 400 });
 
   const form = await request.formData();
   const file = form.get("file");

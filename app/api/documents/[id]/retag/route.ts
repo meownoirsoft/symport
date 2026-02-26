@@ -3,8 +3,10 @@ import { readFileSync, existsSync } from "fs";
 import { prisma } from "@/lib/db";
 import { getUploadPath } from "@/lib/uploads";
 import { extractFromImageBuffer, extractFromText, buildSearchText, normalizeTags, type ExtractedDoc } from "@/lib/extract";
-import type { Prisma } from "@prisma/client";
 
+/**
+ * Re-run AI extraction and update only the document's tags (and searchText for consistency).
+ */
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -49,16 +51,12 @@ export async function POST(
     return NextResponse.json({ error: "Document has no image or note text" }, { status: 400 });
   }
 
-  const searchText = buildSearchText(extractedData as ExtractedDoc);
   const tags = normalizeTags(extractedData.tags);
+  const searchText = buildSearchText({ ...extractedData, tags } as ExtractedDoc);
 
   await prisma.document.update({
     where: { id },
-    data: {
-      extractedData: extractedData as Prisma.InputJsonValue,
-      searchText: searchText || null,
-      tags,
-    },
+    data: { tags, searchText: searchText || null },
   });
 
   const updated = await prisma.document.findUnique({ where: { id } });

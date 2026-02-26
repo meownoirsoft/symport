@@ -1,3 +1,5 @@
+import { getPromptStandardFieldsSection } from "@/lib/document-schemas";
+
 async function getOpenAI() {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY is not set");
@@ -5,7 +7,7 @@ async function getOpenAI() {
   return new OpenAI({ apiKey: key });
 }
 
-const EXTRACTION_SYSTEM = `You are a document extraction assistant. Analyze the image and extract structured data.
+const EXTRACTION_SYSTEM_HEAD = `You are a document extraction assistant. Analyze the image and extract structured data.
 
 Current date context: We are in 2025. Use 2025 (not 2023 or other past years) for any ambiguous or partial dates when no stronger clue is present.
 
@@ -16,27 +18,29 @@ Use context clues from the document text to infer the correct year:
 - "Due in 2026" on a tax-related doc often refers to tax year 2025 (filed in 2026)
 When the document explicitly states a year or tax year, use that year in all date fields. Only fall back to "current year 2025" when no such clue is present.
 
-Respond with a single JSON object. The "type" field must be one of: rx_receipt, eob, utility_bill, general. Include a "tags" field: an array of 3–8 short lowercase labels that help categorize and find this document (e.g. medical, dental, receipt, insurance, eob, tax, w2, hsa, urgent, prescription, utility, bill). Use the document type, category, and salient traits. No spaces in a tag; use underscores if needed (e.g. tax_deductible).
+Respond with a single JSON object. Include "type", "category", "title", and "tags" in every response.
 
-IMPORTANT - "title" (required, 2-5 words max): A short category label only. NO sentences. NO phrases like "This document provides...", "This is a...", or "Document that shows...". Use a concrete label the user would scan for in a list. Examples:
-- Insurance ID card (any insurer: Delta Dental, Blue Cross, etc.) → "Medical ID card" or "Dental insurance card"
-- Pharmacy slip with drug/copay → "Prescription receipt"
-- Explanation of Benefits → "Insurance EOB"
-- Bill from utility company → "Utility bill"
-- Appointment reminder, discharge summary, lab result → "Medical document" or "Appointment reminder"
-Title must be a noun phrase (e.g. "Medical ID card"), never a sentence.
+- "type": one of rx_receipt, eob, utility_bill, general (legacy classification).
+- "category": one of receipt, financial, medical, government, legal, identity, general. Use "receipt" for any purchase/payment receipt (retail, pharmacy, etc.). Use "financial" for bills, statements, EOBs, invoices, utility bills. Use "medical" for medical records, provider statements, prescriptions. Use "government", "legal", or "identity" when the document clearly fits (e.g. tax notice, court doc, ID). Use "general" for everything else.
+- "title" (required, 2-5 words max): Short label only, e.g. "Prescription receipt", "Insurance EOB", "Utility bill". No sentences.
+- "tags": array of 3–8 short labels (e.g. medical, receipt, insurance, tax, HSA). No spaces in a tag; use underscores if needed.
 
-Schema by type (each includes "title" and "tags" as above):
+`;
 
-- rx_receipt: type, title, date (YYYY-MM-DD), pharmacy, drug_name, ndc_code?, quantity?, copay_amount?, insurance_paid?, prescriber?, rx_number?, hsa_eligible?, reimbursement_status? (pending|submitted|reimbursed|not_eligible)
+const EXTRACTION_SYSTEM_TAIL = `
 
-- eob: type, title, date, insurer, member_id?, provider, service_date?, billed_amount?, insurance_paid?, patient_responsibility?, deductible_applied?, linked_rx_receipts? (array), hsa_reimbursable?, claim_number?
+Use null for missing values. Amounts as numbers. Dates as YYYY-MM-DD; use context clues for year (2025 when appropriate). Output only valid JSON, no markdown or explanation.`;
 
-- utility_bill: type, title, date_issued?, due_date?, provider, account_number?, amount_due?, status? (unpaid|paid), autopay?, period_start?, period_end?
+function buildExtractionSystem(): string {
+  return (
+    EXTRACTION_SYSTEM_HEAD +
+    getPromptStandardFieldsSection() +
+    "\n\nFor receipt you may also include: pharmacy, drug_name, copay_amount (map to amount if total), etc. For financial you may also include: insurer, provider, patient_responsibility (map to amount_due), billed_amount, insurance_paid, claim_number, etc." +
+    EXTRACTION_SYSTEM_TAIL
+  );
+}
 
-- general (fallback): type "general", title, detected_category?, date?, issuer?, key_fields? (object), summary?, action_required?, action_description?
-
-Use null for missing values. For amounts use numbers. For dates use YYYY-MM-DD; infer the year from context clues above when present, otherwise use 2025. Always output a "tags" array (string array). Output only valid JSON, no markdown or explanation.`;
+const EXTRACTION_SYSTEM = buildExtractionSystem();
 
 export type ExtractedDoc =
   | { type: "rx_receipt"; [k: string]: unknown }
@@ -92,17 +96,80 @@ export async function extractFromImageBuffer(
   if (t !== "rx_receipt" && t !== "eob" && t !== "utility_bill" && t !== "general") {
     return { ...obj, type: "general" } as ExtractedDoc;
   }
-  return obj as ExtractedDoc;
+  const { normalizeExtractedData } = await import("@/lib/normalize-extraction");
+  return normalizeExtractedData(obj) as ExtractedDoc;
+}
+
+const EXTRACTION_SYSTEM_TEXT = EXTRACTION_SYSTEM.replace(
+  "Analyze the image and extract structured data.",
+  "The user will provide document content as text. Extract structured data from it."
+);
+
+/** Extract same JSON structure from plain text (for notes). */
+export async function extractFromText(
+  text: string,
+  options?: { userFeedback?: string | null }
+): Promise<ExtractedDoc> {
+  let systemContent = EXTRACTION_SYSTEM_TEXT;
+  if (options?.userFeedback?.trim()) {
+    systemContent += `\n\nIMPORTANT - User feedback (apply these corrections):\n${options.userFeedback.trim()}`;
+  }
+
+  const openai = await getOpenAI();
+  const model = process.env.OPENAI_EXTRACTION_MODEL || "gpt-4o";
+  const response = await openai.chat.completions.create({
+    model,
+    messages: [
+      { role: "system", content: systemContent },
+      { role: "user", content: `Document text:\n\n${text.trim()}` },
+    ],
+    max_tokens: 1024,
+  });
+
+  const raw = response.choices[0]?.message?.content?.trim();
+  if (!raw) throw new Error("No extraction response");
+
+  let jsonStr = raw;
+  const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (match) jsonStr = match[1].trim();
+
+  const parsed = JSON.parse(jsonStr);
+  if (typeof parsed !== "object" || parsed === null) {
+    return { type: "general", title: "Note", summary: "Invalid extraction response" } as ExtractedDoc;
+  }
+  const obj = parsed as Record<string, unknown>;
+  const t = obj.type;
+  if (t !== "rx_receipt" && t !== "eob" && t !== "utility_bill" && t !== "general") {
+    return { ...obj, type: "general" } as ExtractedDoc;
+  }
+  const { normalizeExtractedData } = await import("@/lib/normalize-extraction");
+  return normalizeExtractedData(obj) as ExtractedDoc;
+}
+
+/** Effective title for display/search: title or first useful fallback. */
+export function effectiveTitle(data: Record<string, unknown>): string {
+  if (typeof data.title === "string" && data.title.trim()) return data.title.trim();
+  if (typeof data.summary === "string") return data.summary;
+  if (typeof data.provider === "string") return data.provider;
+  if (typeof data.vendor === "string") return data.vendor;
+  if (typeof data.party === "string") return data.party;
+  if (typeof data.insurer === "string") return data.insurer;
+  if (typeof data.pharmacy === "string") return data.pharmacy;
+  if (typeof data.issuer === "string") return data.issuer;
+  if (typeof data.type === "string") return data.type;
+  return "Document";
 }
 
 export function buildSearchText(data: ExtractedDoc): string {
   const parts: string[] = [];
-  if ("title" in data && data.title) parts.push(String(data.title));
-  if ("summary" in data && data.summary) parts.push(String(data.summary));
+  parts.push(effectiveTitle(data as Record<string, unknown>));
+  if ("summary" in data && data.summary && String(data.summary).trim() !== parts[0]) parts.push(String(data.summary));
   if ("pharmacy" in data && data.pharmacy) parts.push(String(data.pharmacy));
   if ("drug_name" in data && data.drug_name) parts.push(String(data.drug_name));
   if ("insurer" in data && data.insurer) parts.push(String(data.insurer));
   if ("provider" in data && data.provider) parts.push(String(data.provider));
+  if ("vendor" in data && data.vendor) parts.push(String(data.vendor));
+  if ("party" in data && data.party) parts.push(String(data.party));
   if ("issuer" in data && data.issuer) parts.push(String(data.issuer));
   if ("tags" in data && Array.isArray(data.tags)) {
     parts.push(...(data.tags as string[]).map((t) => String(t).trim()).filter(Boolean));
@@ -113,12 +180,12 @@ export function buildSearchText(data: ExtractedDoc): string {
   return parts.join(" ");
 }
 
-/** Normalize AI-extracted tags to a string array (lowercase, trimmed, unique). */
+/** Normalize tags to a string array (trimmed, spaces→underscores, unique). Preserves capitalization. */
 export function normalizeTags(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const out = new Set<string>();
   for (const item of value) {
-    const s = String(item).trim().toLowerCase().replace(/\s+/g, "_");
+    const s = String(item).trim().replace(/\s+/g, "_");
     if (s) out.add(s);
   }
   return [...out];

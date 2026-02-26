@@ -5,7 +5,6 @@ import Link from "next/link";
 
 type Doc = {
   id: string;
-  documentType: string;
   status: string;
   tags?: string[];
   extractedData: Record<string, unknown>;
@@ -35,14 +34,14 @@ export default function DocumentsPage() {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
 
   const queryString = () => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
-    if (typeFilter) params.set("type", typeFilter);
     if (statusFilter) params.set("status", statusFilter);
+    if (tagFilter.trim()) params.set("tag", tagFilter.trim());
     return params.toString();
   };
 
@@ -51,7 +50,7 @@ export default function DocumentsPage() {
       .then((r) => r.json())
       .then(setDocs)
       .finally(() => setLoading(false));
-  }, [q, typeFilter, statusFilter]);
+  }, [q, statusFilter, tagFilter]);
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
@@ -69,31 +68,25 @@ export default function DocumentsPage() {
           onChange={(e) => setQ(e.target.value)}
           className="w-full rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-3 text-base"
         />
-        <div className="flex gap-2">
-          <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm"
-            aria-label="Filter by type"
-          >
-            <option value="">All types</option>
-            <option value="rx_receipt">Prescription</option>
-            <option value="eob">EOB</option>
-            <option value="utility_bill">Utility bill</option>
-            <option value="general">General</option>
-          </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm"
-            aria-label="Filter by status"
-          >
-            <option value="">All statuses</option>
-            {STATUSES.filter(Boolean).map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="w-full rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm"
+          aria-label="Filter by status"
+        >
+          <option value="">All statuses</option>
+          {STATUSES.filter(Boolean).map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+        <input
+          type="text"
+          placeholder="Filter by tag (e.g. medical, receipt)"
+          value={tagFilter}
+          onChange={(e) => setTagFilter(e.target.value)}
+          className="w-full rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-sm"
+          aria-label="Filter by tag"
+        />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap gap-2">
             {docs.length > 0 && (
@@ -136,11 +129,11 @@ export default function DocumentsPage() {
                 >
                   <p className="font-medium truncate">{summary(doc.extractedData)}</p>
                   <p className="text-sm text-zinc-500 mt-1">
-                    {doc.documentType} · {doc.status} · {formatDate(doc.createdAt)}
+                    {doc.status} · {formatDate(doc.createdAt)}
                   </p>
                   {Array.isArray(doc.tags) && doc.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-2">
-                      {doc.tags.slice(0, 6).map((tag) => (
+                      {doc.tags.map((tag) => (
                         <span
                           key={tag}
                           className="inline-flex items-center rounded-md bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 text-xs font-medium"
@@ -148,9 +141,6 @@ export default function DocumentsPage() {
                           {tag}
                         </span>
                       ))}
-                      {doc.tags.length > 6 && (
-                        <span className="text-xs text-zinc-500 dark:text-zinc-400">+{doc.tags.length - 6}</span>
-                      )}
                     </div>
                   )}
                 </Link>

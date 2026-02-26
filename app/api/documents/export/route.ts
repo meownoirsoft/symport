@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { toSchemaOrgJsonLd } from "@/lib/document-schemas";
+import type { DocumentKind } from "@/lib/document-schemas";
 
 type DocRow = {
   id: string;
-  documentType: string;
   status: string;
   tags: string[];
   extractedData: Record<string, unknown>;
@@ -13,7 +14,7 @@ type DocRow = {
 function flattenForCsv(doc: DocRow): Record<string, string> {
   const d = doc.extractedData;
   const get = (key: string) => (d[key] != null && d[key] !== "" ? String(d[key]) : "");
-  const title = get("title") || get("summary") || get("provider") || get("pharmacy") || get("insurer") || doc.documentType;
+  const title = get("title") || get("summary") || get("provider") || get("pharmacy") || get("insurer") || get("type") || "Document";
   const date =
     get("date") ||
     get("date_issued") ||
@@ -28,8 +29,8 @@ function flattenForCsv(doc: DocRow): Record<string, string> {
   return {
     id: doc.id,
     title,
-    document_type: doc.documentType,
     status: doc.status,
+    tags: Array.isArray(doc.tags) ? doc.tags.join("; ") : "",
     created_at: doc.createdAt ? new Date(doc.createdAt).toISOString() : "",
     date,
     provider: get("provider") || get("issuer"),
@@ -57,28 +58,27 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const format = searchParams.get("format")?.toLowerCase();
   const q = searchParams.get("q")?.trim();
-  const type = searchParams.get("type")?.trim();
   const status = searchParams.get("status")?.trim();
+  const tag = searchParams.get("tag")?.trim();
 
-  if (format !== "csv" && format !== "json") {
-    return NextResponse.json({ error: "format must be csv or json" }, { status: 400 });
+  if (format !== "csv" && format !== "json" && format !== "schema.org") {
+    return NextResponse.json({ error: "format must be csv, json, or schema.org" }, { status: 400 });
   }
 
   const where: {
     searchText?: { contains: string; mode: "insensitive" };
-    documentType?: string;
     status?: string;
+    tags?: { has: string };
   } = {};
   if (q) where.searchText = { contains: q, mode: "insensitive" };
-  if (type) where.documentType = type;
   if (status) where.status = status;
+  if (tag) where.tags = { has: tag };
 
   const docs = await prisma.document.findMany({
     where,
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
-      documentType: true,
       status: true,
       tags: true,
       extractedData: true,
@@ -88,7 +88,6 @@ export async function GET(request: Request) {
 
   const payload = docs.map((doc) => ({
     id: doc.id,
-    documentType: doc.documentType,
     status: doc.status,
     tags: doc.tags ?? [],
     extractedData: doc.extractedData as Record<string, unknown>,
@@ -100,6 +99,20 @@ export async function GET(request: Request) {
       headers: {
         "Content-Type": "application/json",
         "Content-Disposition": `attachment; filename="symport-export-${new Date().toISOString().slice(0, 10)}.json"`,
+      },
+    });
+  }
+
+  if (format === "schema.org") {
+    const jsonLdArray = payload.map((doc) => {
+      const data = doc.extractedData ?? {};
+      const kind = (data.doc_category as DocumentKind) ?? "general";
+      return toSchemaOrgJsonLd(data as Record<string, unknown>, kind);
+    });
+    return new NextResponse(JSON.stringify(jsonLdArray, null, 2), {
+      headers: {
+        "Content-Type": "application/ld+json",
+        "Content-Disposition": `attachment; filename="symport-export-schema-org-${new Date().toISOString().slice(0, 10)}.jsonld"`,
       },
     });
   }
