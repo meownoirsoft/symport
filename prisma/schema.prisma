@@ -1,0 +1,22 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Document {
+  id            String   @id @default(cuid())
+  imagePath     String   // relative path under uploads dir, e.g. "abc123.jpg"
+  documentType  String   // rx_receipt | eob | utility_bill | general
+  status        String   @default("pending") // pending | paid | unpaid | submitted | reimbursed | not_eligible
+  rotation      Int      @default(0) // display rotation in degrees: 0, 90, 180, 270
+  extractedData Json     // type-specific JSON from AI
+  searchText    String?  // denormalized text for full-text search (summary + key fields)
+  tags         String[] @default([]) // AI-suggested + user-editable labels (e.g. medical, receipt, tax)
+  extractionNotes String? // user feedback to improve extraction or correct mistakes
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}

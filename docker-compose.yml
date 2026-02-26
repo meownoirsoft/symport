@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: symport
+      POSTGRES_PASSWORD: symport
+      POSTGRES_DB: symport
+    ports:
+      - "5433:5432"
+    volumes:
+      - symport_pgdata:/var/lib/postgresql/data
+
+volumes:
+  symport_pgdata:
