@@ -34,5 +34,8 @@ Thumbs.db
 # Uploaded images (sensitive)
 uploads/
 
+# Test data
+test-data/
+
 # Prisma
 prisma/migrations/*_migration_lock.toml
