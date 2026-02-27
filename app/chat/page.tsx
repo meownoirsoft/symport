@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { timeAgo } from "@/lib/time-ago";
 
@@ -79,6 +80,8 @@ export default function ChatPage() {
   const [branchCards, setBranchCards] = useState<BranchCard[]>([]);
   const [branchDrawerOpen, setBranchDrawerOpen] = useState(false);
   const [messageMenuId, setMessageMenuId] = useState<string | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ bottom: number; right: number } | null>(null);
   const [openingCardId, setOpeningCardId] = useState<string | null>(null);
   const [dismissingCardId, setDismissingCardId] = useState<string | null>(null);
   const [wiskrCaptureMessage, setWiskrCaptureMessage] = useState<{ id: string; content: string } | null>(null);
@@ -151,6 +154,18 @@ export default function ChatPage() {
   useEffect(() => {
     loadBranchCards();
   }, [loadBranchCards]);
+
+  useLayoutEffect(() => {
+    if (!messageMenuId || !menuTriggerRef.current) {
+      setMenuPosition(null);
+      return;
+    }
+    const rect = menuTriggerRef.current.getBoundingClientRect();
+    setMenuPosition({
+      bottom: window.innerHeight - rect.top + 4,
+      right: window.innerWidth - rect.right,
+    });
+  }, [messageMenuId]);
 
   // Load Symport documents for the selected category when the Symport panel is open.
   useEffect(() => {
@@ -572,7 +587,7 @@ export default function ChatPage() {
                       className={`flex items-start gap-1 w-full ${isUser ? "flex-row-reverse ml-auto max-w-[90%]" : "max-w-[90%]"}`}
                     >
                       <div
-                        className={`rounded-xl px-4 py-3 max-w-[85%] relative group ${
+                        className={`rounded-xl px-4 py-3 max-w-[92%] relative group ${
                           isUser
                             ? "bg-sky-600 text-white"
                             : "bg-zinc-200 dark:bg-zinc-800"
@@ -587,6 +602,7 @@ export default function ChatPage() {
                           </div>
                           <div className="shrink-0">
                             <button
+                              ref={messageMenuId === m.id ? menuTriggerRef : undefined}
                               type="button"
                               onClick={() => setMessageMenuId(messageMenuId === m.id ? null : m.id)}
                               className="p-1 rounded opacity-70 hover:opacity-100"
@@ -594,33 +610,6 @@ export default function ChatPage() {
                             >
                               ⋯
                             </button>
-                            {messageMenuId === m.id && (
-                              <>
-                                <div
-                                  className="fixed inset-0 z-10"
-                                  aria-hidden
-                                  onClick={() => setMessageMenuId(null)}
-                                />
-                                <div className="absolute right-0 bottom-full mb-1 z-20 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg py-1 min-w-[140px]">
-                                  <button
-                                    type="button"
-                                    onClick={() => followUpLater(m.id, m.content)}
-                                    className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
-                                  >
-                                    Follow up later
-                                  </button>
-                                  {m.role === "assistant" && (
-                                    <button
-                                      type="button"
-                                      onClick={() => openWiskrCapture(m.id, m.content)}
-                                      className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
-                                    >
-                                      Wiskr this
-                                    </button>
-                                  )}
-                                </div>
-                              </>
-                            )}
                           </div>
                         </div>
                       </div>
@@ -634,10 +623,25 @@ export default function ChatPage() {
                   );
                 })}
               </div>
-              {/* Bottom input bar: persona row, then message + actions */}
-              <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
-                {/* Persona selector row (avatar + dropdown combined) */}
-                <div className="flex gap-2 items-center mb-1">
+              {/* Bottom input bar: message box full width, then model + send row */}
+              <div className="shrink-0 p-3 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
+                {/* Message box: full width */}
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      sendMessage();
+                    }
+                  }}
+                  placeholder="Message..."
+                  rows={2}
+                  className="w-full max-h-40 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-lg resize-y"
+                />
+
+                {/* Model selector + Send in same row */}
+                <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 overflow-hidden text-sm">
                     {currentPersona && (
                       <>
@@ -668,40 +672,65 @@ export default function ChatPage() {
                       ))}
                     </select>
                   </div>
-                </div>
-
-                {/* Message + actions row */}
-                <div className="flex gap-2 items-end">
-                  <textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage();
-                      }
-                    }}
-                    placeholder="Message..."
-                    rows={2}
-                    className="flex-1 min-w-0 max-h-40 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-lg resize-y"
-                  />
-                  <div className="flex flex-col gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={sendMessage}
-                      disabled={sending || !input.trim()}
-                      className="rounded-lg bg-sky-600 text-white px-4 py-2 text-base font-medium disabled:opacity-50"
-                      aria-label="Send"
-                    >
-                      Send
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={sendMessage}
+                    disabled={sending || !input.trim()}
+                    className="shrink-0 rounded-lg bg-sky-600 text-white px-4 py-2 text-base font-medium disabled:opacity-50"
+                    aria-label="Send"
+                  >
+                    Send
+                  </button>
                 </div>
               </div>
             </>
           )}
         </main>
       </div>
+
+      {/* Message menu portal (renders outside overflow container so it's not clipped) */}
+      {messageMenuId &&
+        menuPosition &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-30"
+              aria-hidden
+              onClick={() => setMessageMenuId(null)}
+            />
+            <div
+              className="fixed z-40 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg py-1 min-w-[140px]"
+              style={{ bottom: menuPosition.bottom, right: menuPosition.right }}
+            >
+              {(() => {
+                const msg = conversation?.messages.find((mm) => mm.id === messageMenuId);
+                if (!msg) return null;
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => followUpLater(msg.id, msg.content)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                    >
+                      Follow up (branch)
+                    </button>
+                    {msg.role === "assistant" && (
+                      <button
+                        type="button"
+                        onClick={() => openWiskrCapture(msg.id, msg.content)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                      >
+                        Wiskr this (import doc)
+                      </button>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          </>,
+          document.body
+        )}
 
       {/* New conversation modal */}
       {showNewModal && (

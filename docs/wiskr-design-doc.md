@@ -401,7 +401,7 @@ No architectural changes required for this transition. Build it right locally an
 7. **Branch cards** — long press popover, right drawer accumulation
 8. **Side conversations** — open branch in right drawer without losing main
 9. **Wiskr capture** — bidirectional context flow via long press
-10. **Next questions + related ideas** — right drawer intelligence
+10. **Next questions + related ideas** — right drawer intelligence - do not implement
 
 ---
 
