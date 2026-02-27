@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { buildSearchText, type ExtractedDoc } from "@/lib/extract";
+import { updateDocumentEmbedding } from "@/lib/embeddings";
 
 /**
  * Rebuild searchText for all documents from their extractedData.
@@ -20,6 +21,7 @@ export async function POST() {
       where: { id: doc.id },
       data: { searchText },
     });
+    await updateDocumentEmbedding(prisma, doc.id, searchText ?? undefined);
     updated++;
   }
 

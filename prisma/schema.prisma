@@ -7,6 +7,15 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 model Document {
   id            String   @id @default(cuid())
   imagePath     String?  // relative path under uploads dir; null for note-only docs
@@ -15,8 +24,91 @@ model Document {
   rotation      Int      @default(0) // display rotation in degrees: 0, 90, 180, 270
   extractedData Json     // type-specific JSON from AI
   searchText    String?  // denormalized text for full-text search (summary + key fields)
+  embedding     Unsupported("vector(1536)")? // pgvector for semantic search (Wiskr)
   tags         String[] @default([]) // AI-suggested + user-editable labels (e.g. medical, receipt, tax)
   extractionNotes String? // user feedback to improve extraction or correct mistakes
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+// --- Wiskr: multi-model chat on top of Symport context ---
+
+model Persona {
+  id          String   @id @default(cuid())
+  name        String   // "Spark", "Quest", etc.
+  displayName String
+  modelString String   // OpenRouter model id, e.g. google/gemini-2.5-flash
+  provider    String
+  description String?
+  costTier    String   // cheap | mid | expensive
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+  messages    Message[]
+}
+
+model Conversation {
+  id                    String    @id @default(cuid())
+  title                 String?
+  parentConversationId  String?
+  parentConversation    Conversation?  @relation("BranchConversations", fields: [parentConversationId], references: [id])
+  branches              Conversation[] @relation("BranchConversations")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  contexts              ConversationContext[]
+  messages              Message[]
+  branchCards           BranchCard[]     @relation("SourceConversation")
+  branchConversations   BranchCard[]     @relation("BranchConversation")
+  nextQuestions         NextQuestion[]
+}
+
+model ConversationContext {
+  conversationId String
+  contextId      String   // Symport category label: "Medical", "Vehicle", etc.
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  @@id([conversationId, contextId])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String   // user | assistant
+  content        String
+  personaId      String?
+  persona        Persona? @relation(fields: [personaId], references: [id])
+  createdAt      DateTime @default(now())
+  embedding      Unsupported("vector(1536)")?
+  capturedResponses CapturedResponse[]
+  branchCardsAsSource BranchCard[]
+}
+
+model CapturedResponse {
+  id                 String   @id @default(cuid())
+  messageId          String
+  message            Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  content            String
+  addedToContextId   String?  // context label the content was added to
+  createdAt          DateTime @default(now())
+}
+
+model BranchCard {
+  id                    String    @id @default(cuid())
+  sourceConversationId  String
+  sourceConversation    Conversation @relation("SourceConversation", fields: [sourceConversationId], references: [id], onDelete: Cascade)
+  sourceMessageId       String?
+  sourceMessage         Message? @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  triggerText           String?
+  conversationId       String?   // set when opened as side conversation
+  branchConversation    Conversation? @relation("BranchConversation", fields: [conversationId], references: [id], onDelete: SetNull)
+  status                String    @default("pending") // pending | active | dismissed
+  createdAt             DateTime  @default(now())
+}
+
+model NextQuestion {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  content        String
+  used           Boolean  @default(false)
+  createdAt      DateTime @default(now())
 }

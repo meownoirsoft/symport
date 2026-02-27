@@ -1,0 +1,21 @@
+{
+  "categories": [
+    "Medical",
+    "Vehicles",
+    "Household",
+    "Family",
+    "Work",
+    "Legal",
+    "Financial",
+    "Government",
+    "Identity",
+    "Notes",
+    "Tech",
+    "Creative",
+    "Other"
+  ],
+  "tagToCategory": {
+    "tech": "Tech",
+    "creative": "Creative"
+  }
+}

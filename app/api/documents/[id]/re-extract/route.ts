@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from "fs";
 import { prisma } from "@/lib/db";
 import { getUploadPath } from "@/lib/uploads";
 import { extractFromImageBuffer, extractFromText, buildSearchText, normalizeTags, type ExtractedDoc } from "@/lib/extract";
+import { updateDocumentEmbedding } from "@/lib/embeddings";
 import type { Prisma } from "@prisma/client";
 
 export async function POST(
@@ -60,6 +61,7 @@ export async function POST(
       tags,
     },
   });
+  await updateDocumentEmbedding(prisma, id, searchText || undefined);
 
   const updated = await prisma.document.findUnique({ where: { id } });
   return NextResponse.json(updated);

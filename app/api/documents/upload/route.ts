@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getUploadPath, ensureUploadDir } from "@/lib/uploads";
 import { extractFromImageBuffer, buildSearchText, normalizeTags, type ExtractedDoc } from "@/lib/extract";
+import { updateDocumentEmbedding } from "@/lib/embeddings";
 import { sharpenAndEncode } from "@/lib/sharpen";
 import { randomBytes } from "crypto";
 
@@ -67,5 +68,6 @@ export async function POST(request: Request) {
     },
   });
 
+  await updateDocumentEmbedding(prisma, doc.id, searchText || undefined);
   return NextResponse.json({ id: doc.id });
 }

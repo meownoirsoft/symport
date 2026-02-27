@@ -82,12 +82,14 @@ export async function GET(request: Request) {
   });
 
   if (category) {
-    const { getCategoryForTag } = await import("@/lib/document-categories");
+    const { getCategoryForTag, documentBelongsToOnlyOther } = await import("@/lib/document-categories");
     const { readCategoryOverrides } = await import("@/lib/category-overrides");
     const overrides = readCategoryOverrides();
-    docs = docs.filter((doc) =>
-      (doc.tags ?? []).some((t) => getCategoryForTag(String(t), overrides) === category)
-    );
+    docs = docs.filter((doc) => {
+      const tags = (doc.tags ?? []).map((t) => String(t).trim()).filter(Boolean);
+      if (category === "Other") return documentBelongsToOnlyOther(tags, overrides);
+      return tags.some((t) => getCategoryForTag(t, overrides) === category);
+    });
   }
 
   const payload = docs.map((doc) => ({

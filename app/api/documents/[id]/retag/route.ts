@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from "fs";
 import { prisma } from "@/lib/db";
 import { getUploadPath } from "@/lib/uploads";
 import { extractFromImageBuffer, extractFromText, buildSearchText, normalizeTags, type ExtractedDoc } from "@/lib/extract";
+import { updateDocumentEmbedding } from "@/lib/embeddings";
 
 /**
  * Re-run AI extraction and update only the document's tags (and searchText for consistency).
@@ -52,12 +53,13 @@ export async function POST(
   }
 
   const tags = normalizeTags(extractedData.tags);
-  const searchText = buildSearchText({ ...extractedData, tags } as ExtractedDoc);
+  const searchText = buildSearchText({ ...extractedData, tags } as unknown as ExtractedDoc);
 
   await prisma.document.update({
     where: { id },
     data: { tags, searchText: searchText || null },
   });
+  await updateDocumentEmbedding(prisma, id, searchText || undefined);
 
   const updated = await prisma.document.findUnique({ where: { id } });
   return NextResponse.json(updated);

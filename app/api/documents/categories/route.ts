@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getCategoryForTag, type DocumentCategoryLabel } from "@/lib/document-categories";
+import { getCategoryForTag, documentBelongsToOnlyOther, type DocumentCategoryLabel } from "@/lib/document-categories";
 import { readCategoryOverrides, getEffectiveCategories } from "@/lib/category-overrides";
 
 /**
- * Return all topic categories with document counts. A doc counts in a category
- * if it has at least one tag that maps to that category.
+ * Return all topic categories with document counts.
+ * A doc counts in a non-Other category if it has at least one tag mapping to that category.
+ * A doc counts in Other only if it has no tag mapping to any other category (Other is the default for uncategorized).
  */
 export async function GET() {
   const overrides = readCategoryOverrides();
@@ -20,16 +21,19 @@ export async function GET() {
   }
 
   for (const doc of docs) {
-    const tags = doc.tags ?? [];
+    const tags = (doc.tags ?? []).map((t) => String(t).trim()).filter(Boolean);
     const categoriesInDoc = new Set<DocumentCategoryLabel>();
     for (const tag of tags) {
-      if (typeof tag === "string" && tag.trim()) {
-        const cat = getCategoryForTag(tag, overrides);
-        if (categories.includes(cat)) categoriesInDoc.add(cat);
-      }
+      const cat = getCategoryForTag(tag, overrides);
+      if (categories.includes(cat)) categoriesInDoc.add(cat);
     }
     for (const cat of categoriesInDoc) {
-      countByCategory.set(cat, (countByCategory.get(cat) ?? 0) + 1);
+      if (cat !== "Other") {
+        countByCategory.set(cat, (countByCategory.get(cat) ?? 0) + 1);
+      }
+    }
+    if (documentBelongsToOnlyOther(tags, overrides)) {
+      countByCategory.set("Other", (countByCategory.get("Other") ?? 0) + 1);
     }
   }
 

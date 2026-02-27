@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { normalizeExtractedData } from "@/lib/normalize-extraction";
 import { buildSearchText, type ExtractedDoc } from "@/lib/extract";
+import { updateDocumentEmbedding } from "@/lib/embeddings";
 
 /**
  * Re-normalize extractedData for all documents using the schema registry.
@@ -28,6 +29,7 @@ export async function POST() {
         searchText,
       },
     });
+    await updateDocumentEmbedding(prisma, doc.id, searchText ?? undefined);
     updated++;
   }
 

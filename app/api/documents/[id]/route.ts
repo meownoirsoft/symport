@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { deleteUploadFile } from "@/lib/uploads";
 import { buildSearchText, type ExtractedDoc } from "@/lib/extract";
+import { updateDocumentEmbedding } from "@/lib/embeddings";
 import { toSchemaOrgJsonLd } from "@/lib/document-schemas";
 import type { DocumentKind } from "@/lib/document-schemas";
 
@@ -92,8 +94,14 @@ export async function PATCH(
 
   const doc = await prisma.document.update({
     where: { id },
-    data,
+    data: {
+      ...data,
+      extractedData: data.extractedData as Prisma.InputJsonValue | undefined,
+    },
   });
+  if (data.searchText !== undefined) {
+    await updateDocumentEmbedding(prisma, id, data.searchText ?? undefined);
+  }
   return NextResponse.json(doc);
 }
 

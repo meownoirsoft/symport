@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 
@@ -30,7 +30,7 @@ function summary(data: Record<string, unknown>): string {
   return (data.type as string) || "Document";
 }
 
-export default function DocumentsPage() {
+function DocumentsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -257,5 +257,13 @@ export default function DocumentsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function DocumentsPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading…</div>}>
+      <DocumentsContent />
+    </Suspense>
   );
 }

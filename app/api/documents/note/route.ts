@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { extractFromText, buildSearchText, normalizeTags, type ExtractedDoc } from "@/lib/extract";
+import { updateDocumentEmbedding } from "@/lib/embeddings";
 
 export async function POST(request: Request) {
   let body: { text?: string };
@@ -28,8 +29,9 @@ export async function POST(request: Request) {
         searchText: text.slice(0, 500),
         tags: ["note"],
       },
-      });
-      return NextResponse.json({ id: doc.id });
+    });
+    await updateDocumentEmbedding(prisma, doc.id, text.slice(0, 500));
+    return NextResponse.json({ id: doc.id });
     } catch (err) {
       console.error("Note create failed (no key):", err);
       return NextResponse.json(
@@ -68,6 +70,7 @@ export async function POST(request: Request) {
         tags,
       },
     });
+    await updateDocumentEmbedding(prisma, doc.id, searchText || undefined);
     return NextResponse.json({ id: doc.id });
   } catch (err) {
     console.error("Note create failed:", err);

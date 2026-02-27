@@ -167,6 +167,36 @@ export function getTagsForCategory(
   return [...allKeys].filter((t) => getCategoryForTag(t, overrides) === category);
 }
 
+/**
+ * Get the set of categories a document belongs to (based on its tags).
+ * A doc can appear in multiple categories if it has tags mapping to different ones.
+ */
+export function getCategoriesForDocument(
+  tags: string[],
+  overrides?: CategoryOverridesMap
+): Set<DocumentCategoryLabel> {
+  const set = new Set<DocumentCategoryLabel>();
+  for (const tag of tags) {
+    if (typeof tag === "string" && tag.trim()) {
+      set.add(getCategoryForTag(tag, overrides));
+    }
+  }
+  return set;
+}
+
+/**
+ * True if the document belongs only to "Other" (or no category).
+ * Use this so docs that appear in Medical, Financial, etc. do not also show in Other.
+ */
+export function documentBelongsToOnlyOther(
+  tags: string[],
+  overrides?: CategoryOverridesMap
+): boolean {
+  const categories = getCategoriesForDocument(tags, overrides);
+  const nonOther = [...categories].filter((c) => c !== "Other");
+  return nonOther.length === 0;
+}
+
 /** Categories that have at least one mapped tag (for display order). */
 export function getCategoriesWithTags(): DocumentCategoryLabel[] {
   const seen = new Set<DocumentCategoryLabel>();
