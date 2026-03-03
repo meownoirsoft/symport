@@ -82,6 +82,15 @@ export default function ChatPage() {
   const [messageMenuId, setMessageMenuId] = useState<string | null>(null);
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ bottom: number; right: number } | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  const [selectionMenu, setSelectionMenu] = useState<{
+    messageId: string;
+    role: string;
+    text: string;
+    bottom: number;
+    right: number;
+  } | null>(null);
   const [openingCardId, setOpeningCardId] = useState<string | null>(null);
   const [dismissingCardId, setDismissingCardId] = useState<string | null>(null);
   const [wiskrCaptureMessage, setWiskrCaptureMessage] = useState<{ id: string; content: string } | null>(null);
@@ -96,6 +105,21 @@ export default function ChatPage() {
     { id: string; extractedData: Record<string, unknown>; createdAt: string }[]
   >([]);
   const [symportLoading, setSymportLoading] = useState(false);
+  const [showContextPreview, setShowContextPreview] = useState(false);
+  const [contextPreviewText, setContextPreviewText] = useState<string>("");
+  const [contextPreviewLoading, setContextPreviewLoading] = useState(false);
+  const [contextPreviewError, setContextPreviewError] = useState<string | null>(null);
+  const [branchDrawerMode, setBranchDrawerMode] = useState<"branches" | "conversations">("branches");
+  const [contextChangedSuggestNewConversation, setContextChangedSuggestNewConversation] = useState(false);
+
+  /** True when at least one previously selected context was removed (not when only adding). */
+  const contextSetHadRemoval = useCallback(
+    (prev: { contextId: string }[], next: { contextId: string }[]) => {
+      const nextSet = new Set(next.map((c) => c.contextId));
+      return prev.some((c) => !nextSet.has(c.contextId));
+    },
+    []
+  );
 
   const loadPersonas = useCallback(async () => {
     const res = await fetch("/api/wiskr/personas");
@@ -167,6 +191,52 @@ export default function ChatPage() {
     });
   }, [messageMenuId]);
 
+  useEffect(() => {
+    if (conversation?.messages?.length) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [conversation?.messages?.length]);
+
+  useEffect(() => {
+    const handleMouseUp = () => {
+      const sel = window.getSelection();
+      const text = sel?.toString().trim();
+      if (!text || !selectedId) {
+        setSelectionMenu(null);
+        return;
+      }
+      const node = sel?.anchorNode;
+      const el = node instanceof Element ? node : node?.parentElement;
+      const messageEl = el?.closest?.("[data-message-id]");
+      if (!messageEl || !(messageEl instanceof HTMLElement)) {
+        setSelectionMenu(null);
+        return;
+      }
+      const messageId = messageEl.getAttribute("data-message-id");
+      const role = messageEl.getAttribute("data-message-role") || "user";
+      if (!messageId) {
+        setSelectionMenu(null);
+        return;
+      }
+      const range = sel?.getRangeAt(0);
+      const rect = range?.getBoundingClientRect();
+      if (!rect) {
+        setSelectionMenu(null);
+        return;
+      }
+      setMessageMenuId(null);
+      setSelectionMenu({
+        messageId,
+        role,
+        text,
+        bottom: window.innerHeight - rect.top + 4,
+        right: window.innerWidth - rect.right,
+      });
+    };
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => document.removeEventListener("mouseup", handleMouseUp);
+  }, [selectedId]);
+
   // Load Symport documents for the selected category when the Symport panel is open.
   useEffect(() => {
     if (!showSymportPanel) return;
@@ -196,8 +266,10 @@ export default function ChatPage() {
   useEffect(() => {
     if (!selectedId) {
       setConversation(null);
+      setContextChangedSuggestNewConversation(false);
       return;
     }
+    setContextChangedSuggestNewConversation(false);
     let cancelled = false;
     (async () => {
       const res = await fetch(`/api/wiskr/conversations/${selectedId}`);
@@ -252,8 +324,16 @@ export default function ChatPage() {
       });
       if (res.ok) {
         const updated = await res.json();
+        const prevContexts = conversation?.contexts ?? [];
         setConversation((prev) => (prev ? { ...prev, contexts: updated.contexts } : null));
         setShowContextPicker(false);
+        if (
+          conversation &&
+          conversation.messages.length > 0 &&
+          contextSetHadRemoval(prevContexts, updated.contexts)
+        ) {
+          setContextChangedSuggestNewConversation(true);
+        }
       }
     } finally {
       setPatchingContexts(false);
@@ -272,10 +352,41 @@ export default function ChatPage() {
       });
       if (res.ok) {
         const updated = await res.json();
+        const prevContexts = conversation?.contexts ?? [];
         setConversation((prev) => (prev ? { ...prev, contexts: updated.contexts } : null));
+        if (
+          conversation &&
+          conversation.messages.length > 0 &&
+          contextSetHadRemoval(prevContexts, updated.contexts)
+        ) {
+          setContextChangedSuggestNewConversation(true);
+        }
       }
     } finally {
       setPatchingContexts(false);
+    }
+  };
+
+  const startNewConversationFromContextChange = async () => {
+    if (!conversation) return;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/wiskr/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: conversation.title ? `${conversation.title} (continued)` : "New conversation",
+          contextIds: conversation.contexts.map((c) => c.contextId),
+        }),
+      });
+      if (res.ok) {
+        const conv = await res.json();
+        await loadConversations();
+        setSelectedId(conv.id);
+        setContextChangedSuggestNewConversation(false);
+      }
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -418,6 +529,36 @@ export default function ChatPage() {
     }
   };
 
+  const openContextPreview = async () => {
+    if (!selectedId) return;
+    setContextPreviewLoading(true);
+    setContextPreviewError(null);
+    setShowContextPreview(true);
+    try {
+      const res = await fetch(`/api/wiskr/conversations/${selectedId}/context-preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: input,
+          personaId: personaId || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setContextPreviewError(err?.error ?? "Failed to load context preview.");
+        setContextPreviewText("");
+        return;
+      }
+      const data = await res.json();
+      setContextPreviewText(typeof data.contextPackage === "string" ? data.contextPackage : "");
+    } catch {
+      setContextPreviewError("Failed to load context preview.");
+      setContextPreviewText("");
+    } finally {
+      setContextPreviewLoading(false);
+    }
+  };
+
   const currentPersona =
     personas.find((p) => p.id === personaId) ?? (personas.length ? personas[0] : null);
 
@@ -538,7 +679,10 @@ export default function ChatPage() {
           {selectedId && branchCards.length > 0 && (
             <button
               type="button"
-              onClick={() => setBranchDrawerOpen(true)}
+              onClick={() => {
+                setBranchDrawerMode("branches");
+                setBranchDrawerOpen(true);
+              }}
               className="text-xs rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 px-2 py-0.5 font-medium"
             >
               Branches ({branchCards.length})
@@ -577,6 +721,30 @@ export default function ChatPage() {
                   + Contexts
                 </button>
               </div>
+              {contextChangedSuggestNewConversation && conversation && conversation.messages.length > 0 && (
+                <div className="px-3 py-2 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800 flex flex-wrap items-center gap-2 text-sm">
+                  <span className="text-amber-800 dark:text-amber-200">
+                    You changed contexts. Starting a new conversation keeps things tidy.
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={startNewConversationFromContextChange}
+                      disabled={creating}
+                      className="rounded-lg bg-sky-600 text-white px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+                    >
+                      {creating ? "…" : "Start new conversation"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setContextChangedSuggestNewConversation(false)}
+                      className="rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      Keep editing
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="flex-1 overflow-auto p-4 space-y-4">
                 {conversation?.messages.map((m) => {
                   const isUser = m.role === "user";
@@ -598,13 +766,22 @@ export default function ChatPage() {
                             {m.role === "assistant" && m.persona && (
                               <div className="text-xs opacity-80 mb-1">{m.persona.displayName}</div>
                             )}
-                            <div className="whitespace-pre-wrap">{m.content}</div>
+                            <div
+                              className="whitespace-pre-wrap select-text"
+                              data-message-id={m.id}
+                              data-message-role={m.role}
+                            >
+                              {m.content}
+                            </div>
                           </div>
                           <div className="shrink-0">
                             <button
                               ref={messageMenuId === m.id ? menuTriggerRef : undefined}
                               type="button"
-                              onClick={() => setMessageMenuId(messageMenuId === m.id ? null : m.id)}
+                              onClick={() => {
+                                setSelectionMenu(null);
+                                setMessageMenuId(messageMenuId === m.id ? null : m.id);
+                              }}
                               className="p-1 rounded opacity-70 hover:opacity-100"
                               aria-label="Message actions"
                             >
@@ -622,6 +799,7 @@ export default function ChatPage() {
                     </div>
                   );
                 })}
+                <div ref={messagesEndRef} />
               </div>
               {/* Bottom input bar: message box full width, then model + send row */}
               <div className="shrink-0 p-3 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
@@ -640,8 +818,8 @@ export default function ChatPage() {
                   className="w-full max-h-40 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-lg resize-y"
                 />
 
-                {/* Model selector + Send in same row */}
-                <div className="flex items-center justify-between gap-2">
+                {/* Model selector, Context preview, context count, Send */}
+                <div className="flex items-center flex-wrap gap-2">
                   <div className="flex items-center gap-2 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 overflow-hidden text-sm">
                     {currentPersona && (
                       <>
@@ -672,11 +850,26 @@ export default function ChatPage() {
                       ))}
                     </select>
                   </div>
+                  <div className="flex flex-col items-start gap-0.5 shrink-0">
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {conversation?.contexts.length
+                        ? `${conversation.contexts.length} context${conversation.contexts.length === 1 ? "" : "s"} selected`
+                        : "No contexts selected"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={openContextPreview}
+                      disabled={!selectedId || contextPreviewLoading}
+                      className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-50 disabled:no-underline"
+                    >
+                      {contextPreviewLoading ? "Loading context…" : "Context preview"}
+                    </button>
+                  </div>
                   <button
                     type="button"
                     onClick={sendMessage}
                     disabled={sending || !input.trim()}
-                    className="shrink-0 rounded-lg bg-sky-600 text-white px-4 py-2 text-base font-medium disabled:opacity-50"
+                    className="ml-auto shrink-0 rounded-lg bg-sky-600 text-white px-4 py-2 text-base font-medium disabled:opacity-50"
                     aria-label="Send"
                   >
                     Send
@@ -697,7 +890,10 @@ export default function ChatPage() {
             <div
               className="fixed inset-0 z-30"
               aria-hidden
-              onClick={() => setMessageMenuId(null)}
+              onClick={() => {
+                setMessageMenuId(null);
+                setSelectionMenu(null);
+              }}
             />
             <div
               className="fixed z-40 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg py-1 min-w-[140px]"
@@ -727,6 +923,52 @@ export default function ChatPage() {
                   </>
                 );
               })()}
+            </div>
+          </>,
+          document.body
+        )}
+
+      {/* Selection menu portal (text selection actions) */}
+      {selectionMenu &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-30"
+              aria-hidden
+              onClick={() => {
+                setSelectionMenu(null);
+                window.getSelection()?.removeAllRanges();
+              }}
+            />
+            <div
+              className="fixed z-40 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg py-1 min-w-[140px]"
+              style={{ bottom: selectionMenu.bottom, right: selectionMenu.right }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  followUpLater(selectionMenu.messageId, selectionMenu.text);
+                  setSelectionMenu(null);
+                  window.getSelection()?.removeAllRanges();
+                }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+              >
+                Follow up (branch)
+              </button>
+              {selectionMenu.role === "assistant" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    openWiskrCapture(selectionMenu.messageId, selectionMenu.text);
+                    setSelectionMenu(null);
+                    window.getSelection()?.removeAllRanges();
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                >
+                  Wiskr this (import doc)
+                </button>
+              )}
             </div>
           </>,
           document.body
@@ -1032,7 +1274,39 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Branch cards drawer (right) */}
+      {/* Context preview modal */}
+      {showContextPreview && (
+        <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl max-w-xl w-full max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-zinc-200 dark:border-zinc-800">
+              <h2 className="font-semibold text-sm">Context preview</h2>
+              <button
+                type="button"
+                onClick={() => setShowContextPreview(false)}
+                className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                aria-label="Close context preview"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-4 flex-1 overflow-auto">
+              {contextPreviewLoading ? (
+                <p className="text-sm text-zinc-500">Loading context…</p>
+              ) : contextPreviewError ? (
+                <p className="text-sm text-red-500">{contextPreviewError}</p>
+              ) : contextPreviewText ? (
+                <pre className="whitespace-pre-wrap text-xs text-zinc-800 dark:text-zinc-100">
+                  {contextPreviewText}
+                </pre>
+              ) : (
+                <p className="text-sm text-zinc-500">No context available for this conversation.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Branch cards / branch conversations drawer (right) */}
       {branchDrawerOpen && selectedId && (
         <div className="fixed inset-0 z-20 flex justify-end">
           <div
@@ -1042,7 +1316,33 @@ export default function ChatPage() {
           />
           <div className="relative w-full max-w-sm bg-white dark:bg-zinc-900 shadow-xl flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-zinc-200 dark:border-zinc-800">
-              <h2 className="font-semibold">Follow up later</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="font-semibold text-sm">Side panel</h2>
+                <div className="inline-flex rounded-full border border-zinc-300 dark:border-zinc-700 text-xs overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setBranchDrawerMode("branches")}
+                    className={`px-3 py-1 ${
+                      branchDrawerMode === "branches"
+                        ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
+                        : "bg-transparent text-zinc-600 dark:text-zinc-300"
+                    }`}
+                  >
+                    Branches
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBranchDrawerMode("conversations")}
+                    className={`px-3 py-1 border-l border-zinc-300 dark:border-zinc-700 ${
+                      branchDrawerMode === "conversations"
+                        ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
+                        : "bg-transparent text-zinc-600 dark:text-zinc-300"
+                    }`}
+                  >
+                    Conversations
+                  </button>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setBranchDrawerOpen(false)}
@@ -1053,38 +1353,73 @@ export default function ChatPage() {
               </button>
             </div>
             <ul className="flex-1 overflow-auto p-3 space-y-3">
-              {branchCards.length === 0 ? (
-                <li className="text-sm text-zinc-500 py-4">No branch cards. Use ⋯ on a message and choose “Follow up later”.</li>
-              ) : (
-                branchCards.map((card) => (
-                  <li
-                    key={card.id}
-                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2"
-                  >
-                    <p className="text-sm line-clamp-2">
-                      {card.triggerText || card.sourceMessage?.content || "—"}
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openBranchAsConversation(card)}
-                        disabled={!!openingCardId}
-                        className="text-sm rounded-lg bg-sky-600 text-white px-3 py-1.5 font-medium disabled:opacity-50"
-                      >
-                        {openingCardId === card.id ? "…" : "Open"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => dismissBranchCard(card.id)}
-                        disabled={!!dismissingCardId}
-                        className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5 disabled:opacity-50"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
+              {branchDrawerMode === "branches" ? (
+                branchCards.length === 0 ? (
+                  <li className="text-sm text-zinc-500 py-4">
+                    No branch cards. Use ⋯ on a message and choose “Follow up later”.
                   </li>
-                ))
-              )}
+                ) : (
+                  branchCards.map((card) => (
+                    <li
+                      key={card.id}
+                      className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2"
+                    >
+                      <p className="text-sm line-clamp-2">
+                        {card.triggerText || card.sourceMessage?.content || "—"}
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openBranchAsConversation(card)}
+                          disabled={!!openingCardId}
+                          className="text-sm rounded-lg bg-sky-600 text-white px-3 py-1.5 font-medium disabled:opacity-50"
+                        >
+                          {openingCardId === card.id ? "…" : "Open"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => dismissBranchCard(card.id)}
+                          disabled={!!dismissingCardId}
+                          className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5 disabled:opacity-50"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </li>
+                  ))
+                )
+              ) : (() => {
+                const branchConversations = conversations.filter(
+                  (c) => c.parentConversation && c.parentConversation.id === selectedId
+                );
+                if (branchConversations.length === 0) {
+                  return (
+                    <li className="text-sm text-zinc-500 py-4">
+                      No branch conversations yet. Branches you open will appear here.
+                    </li>
+                  );
+                }
+                return branchConversations.map((c) => (
+                  <li
+                    key={c.id}
+                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedId(c.id);
+                        setBranchDrawerOpen(false);
+                      }}
+                      className="w-full text-left text-sm font-medium hover:underline"
+                    >
+                      {c.title ?? "Untitled"} ({c._count.messages})
+                    </button>
+                    <p className="text-xs text-zinc-500">
+                      Child of this conversation • Updated {timeAgo(c.updatedAt)}
+                    </p>
+                  </li>
+                ));
+              })()}
             </ul>
           </div>
         </div>

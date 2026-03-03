@@ -69,15 +69,16 @@ model ConversationContext {
 }
 
 model Message {
-  id             String   @id @default(cuid())
-  conversationId String
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  role           String   // user | assistant
-  content        String
-  personaId      String?
-  persona        Persona? @relation(fields: [personaId], references: [id])
-  createdAt      DateTime @default(now())
-  embedding      Unsupported("vector(1536)")?
+  id                 String   @id @default(cuid())
+  conversationId     String
+  conversation       Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role               String   // user | assistant
+  content            String
+  personaId          String?
+  persona            Persona? @relation(fields: [personaId], references: [id])
+  createdAt          DateTime @default(now())
+  embedding          Unsupported("vector(1536)")?
+  activeContextIds   Json?    // context IDs active when this message was sent (string[])
   capturedResponses CapturedResponse[]
   branchCardsAsSource BranchCard[]
 }
