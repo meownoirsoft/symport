@@ -25,24 +25,25 @@ Traditional document storage systems only store images or PDFs. They do not extr
 Symport uses AI vision models to **interpret documents and convert them into structured data**, enabling search, tagging, and downstream automation.
 
 ---
+## Architecture
 
-# Architecture
+Symport converts real-world documents into structured records through an ingestion pipeline:
 
-Symport uses a document ingestion pipeline designed to convert real-world images into structured records.
-
-Document Capture (camera or upload)  
-↓  
-Image processing  
-↓  
-AI Vision Extraction (GPT-4o)  
-↓  
-Structured JSON output  
-↓  
-PostgreSQL storage  
-↓  
-Search + tagging interface  
-↓  
+```
+Document Capture (camera or upload)
+        ↓
+Image preprocessing
+        ↓
+AI Vision Extraction (GPT-4o)
+        ↓
+Structured JSON generation
+        ↓
+PostgreSQL storage
+        ↓
+Search + tagging interface
+        ↓
 Exportable structured data
+```
 
 
 ---
