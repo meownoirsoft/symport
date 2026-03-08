@@ -2,7 +2,9 @@
 
 AI-powered document ingestion system that converts real-world paperwork into structured, searchable data.
 
-Symport is a mobile-first web application that captures documents (camera or file upload), extracts structured information using AI vision models, and stores the results in a searchable database. The system enables users to turn messy paper records into structured JSON that can be queried, tagged, and exported.
+Symport is a mobile-first web application that captures documents (camera or file upload), extracts structured information using AI vision models, and stores the results in a searchable database.
+
+The system acts as an AI-powered document ingestion pipeline, transforming real-world paperwork into structured JSON that can be searched, tagged, and exported for automation workflows.
 
 ---
 
