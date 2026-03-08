@@ -82,6 +82,16 @@ Each document can be exported as JSON for integration with other systems.
 
 ---
 
+## Engineering Highlights
+
+• AI-powered document understanding using GPT-4o vision  
+• Structured JSON extraction from unstructured document images  
+• Mobile-first capture workflow for real-world inputs  
+• Full-stack implementation using Next.js, Node, Prisma, and PostgreSQL  
+• Extensible document schema supporting multiple document categories
+
+---
+
 # Example Extracted Data
 
 Example output generated from a utility bill:
