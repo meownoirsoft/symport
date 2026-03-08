@@ -204,7 +204,7 @@ npm run docker:up   # Start Postgres in Docker
 
 # Project Status
 
-Active prototype.
+Active prototype. The project serves as an exploration of AI-powered document ingestion systems and practical workflows for turning unstructured documents into structured data.
 
 The system is evolving as part of ongoing experimentation with AI-powered document understanding and structured data extraction.
 
