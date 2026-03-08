@@ -109,16 +109,18 @@ Example output generated from a utility bill:
 # Technology Stack
 
 ### Frontend
-Next.js
+- Next.js
+
 ### Backend
-Node.js API routes
+- Node.js API routes
+
 ### Database
-PostgreSQL + Prisma ORM
+- PostgreSQL + Prisma ORM
 ### AI
-OpenAI GPT-4o Vision
+- OpenAI GPT-4o Vision
 
 ### Infrastructure
-Docker
+- Docker
 
 ---
 
