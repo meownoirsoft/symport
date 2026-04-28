@@ -19,10 +19,17 @@ function flattenForCsv(doc: DocRow): Record<string, string> {
     get("date_issued") ||
     get("service_date") ||
     (doc.createdAt ? new Date(doc.createdAt).toISOString().slice(0, 10) : "");
+  // amount = out-of-pocket / purchase amount (what to claim for HSA/FSA or deduct).
   const amount =
+    get("amount") ||
+    get("amount_paid") ||
+    get("copay_amount") ||
+    get("patient_responsibility") ||
+    "";
+  // amount_due = what is owed on a bill/EOB.
+  const amountDue =
     get("amount_due") ||
     get("patient_responsibility") ||
-    get("copay_amount") ||
     get("billed_amount") ||
     "";
   return {
@@ -31,11 +38,15 @@ function flattenForCsv(doc: DocRow): Record<string, string> {
     tags: Array.isArray(doc.tags) ? doc.tags.join("; ") : "",
     created_at: doc.createdAt ? new Date(doc.createdAt).toISOString() : "",
     date,
+    vendor: get("vendor"),
     provider: get("provider") || get("issuer"),
     pharmacy: get("pharmacy"),
     insurer: get("insurer"),
-    amount_due: amount,
+    amount,
+    amount_due: amountDue,
     due_date: get("due_date"),
+    tax_category: get("tax_category"),
+    hsa_fsa_eligible: get("hsa_fsa_eligible"),
     summary: (get("summary") || "").slice(0, 200),
   };
 }

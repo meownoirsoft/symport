@@ -58,6 +58,33 @@ function pickString(v: unknown): string | null {
   return s || null;
 }
 
+function pickBoolean(v: unknown): boolean | null {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase();
+    if (s === "true" || s === "yes" || s === "1") return true;
+    if (s === "false" || s === "no" || s === "0") return false;
+  }
+  return null;
+}
+
+const TAX_CATEGORY_VALUES = new Set([
+  "medical",
+  "charity",
+  "tax_payment",
+  "mortgage_interest",
+  "business_expense",
+  "personal",
+  "unknown",
+]);
+
+function pickTaxCategory(v: unknown): string | null {
+  const s = pickString(v);
+  if (!s) return null;
+  const normalized = s.toLowerCase().replace(/[\s-]+/g, "_");
+  return TAX_CATEGORY_VALUES.has(normalized) ? normalized : "unknown";
+}
+
 /** Multi-source value resolution for receipt. */
 function applyReceiptValues(
   result: Record<string, unknown>,
@@ -143,6 +170,19 @@ function ensureStandardFields(
   }
 }
 
+/** Coerce tax_category and hsa_fsa_eligible to canonical types if present. */
+function applyTaxFields(
+  result: Record<string, unknown>,
+  raw: Record<string, unknown>
+): void {
+  if ("tax_category" in raw) {
+    result.tax_category = pickTaxCategory(raw.tax_category);
+  }
+  if ("hsa_fsa_eligible" in raw) {
+    result.hsa_fsa_eligible = pickBoolean(raw.hsa_fsa_eligible);
+  }
+}
+
 /**
  * Normalize raw extraction into a consistent shape using the schema
  * registry. Kind is derived from raw data; aliases are applied and
@@ -157,6 +197,7 @@ export function normalizeExtractedData(raw: Record<string, unknown>): Record<str
   if (kind === "financial") applyFinancialValues(result, raw);
 
   if (schema.aliases) applyAliases(result, raw, schema.aliases);
+  applyTaxFields(result, raw);
   ensureStandardFields(result, schema.standardFields);
 
   return result;

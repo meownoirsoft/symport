@@ -45,6 +45,8 @@ export const DOCUMENT_SCHEMAS: Record<DocumentKind, DocumentSchema> = {
       "payment_method",
       "tax",
       "currency",
+      "tax_category",
+      "hsa_fsa_eligible",
       "title",
       "tags",
     ],
@@ -65,7 +67,7 @@ export const DOCUMENT_SCHEMAS: Record<DocumentKind, DocumentSchema> = {
       date: "orderDate",
       vendor: "seller",
       payment_method: "paymentMethod",
-      currency: "currency",
+      currency: "priceCurrency",
     },
   },
   financial: {
@@ -80,6 +82,8 @@ export const DOCUMENT_SCHEMAS: Record<DocumentKind, DocumentSchema> = {
       "status",
       "period_start",
       "period_end",
+      "tax_category",
+      "hsa_fsa_eligible",
       "title",
       "tags",
     ],
@@ -103,9 +107,7 @@ export const DOCUMENT_SCHEMAS: Record<DocumentKind, DocumentSchema> = {
     schemaOrgType: "Invoice",
     schemaOrgFieldMap: {
       amount_due: "totalPaymentDue",
-      amount_paid: "amountPaid",
-      date: "paymentDue",
-      due_date: "paymentDue",
+      due_date: "paymentDueDate",
       party: "provider",
       account_ref: "accountId",
       status: "paymentStatus",
@@ -121,6 +123,8 @@ export const DOCUMENT_SCHEMAS: Record<DocumentKind, DocumentSchema> = {
       "amount",
       "insurer",
       "service_date",
+      "tax_category",
+      "hsa_fsa_eligible",
       "title",
       "tags",
     ],
@@ -131,11 +135,6 @@ export const DOCUMENT_SCHEMAS: Record<DocumentKind, DocumentSchema> = {
       type: "document_type",
       copay_amount: "amount",
       patient_responsibility: "amount",
-    },
-    schemaOrgType: "MedicalWebPage",
-    schemaOrgFieldMap: {
-      provider: "about",
-      date: "datePublished",
     },
   },
   government: {
@@ -189,6 +188,26 @@ export function getPromptStandardFieldsSection(): string {
   }
   lines.push(
     'When category is "general": title, summary?, date?, issuer?, key_fields? (object), action_required?.'
+  );
+  lines.push(
+    [
+      'TAX_CATEGORY (US tax bucket — pick the closest single value, or "unknown"):',
+      '- "medical": qualified medical/dental expense (Schedule A medical; also potential HSA/FSA reimbursement)',
+      '- "charity": donation to a 501(c)(3) or similar (Schedule A charitable)',
+      '- "tax_payment": state/local/property/estimated tax paid (Schedule A SALT)',
+      '- "mortgage_interest": home mortgage interest (Schedule A interest)',
+      '- "business_expense": ordinary and necessary self-employed business expense (Schedule C)',
+      '- "personal": personal expense, not deductible',
+      '- "unknown": cannot determine from document',
+    ].join("\n")
+  );
+  lines.push(
+    [
+      'HSA_FSA_ELIGIBLE (true/false/null per IRS Pub 502 qualified medical expenses):',
+      '- true: clearly qualified (Rx copays, prescription drugs, doctor/dentist/vision visits, eligible medical equipment, eligible OTC items with Rx)',
+      '- false: clearly NOT qualified (cosmetic procedures, gym memberships, general-wellness vitamins without Rx, toiletries)',
+      '- null: cannot determine',
+    ].join("\n")
   );
   return lines.join("\n\n");
 }
