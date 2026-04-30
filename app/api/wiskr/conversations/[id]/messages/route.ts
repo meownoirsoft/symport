@@ -25,6 +25,10 @@ export async function POST(
   const body = await request.json().catch(() => ({}));
   const content = typeof body.content === "string" ? body.content.trim() : "";
   const personaId = typeof body.personaId === "string" ? body.personaId : null;
+  const taxYear =
+    typeof body.taxYear === "string" && /^\d{4}$/.test(body.taxYear.trim())
+      ? body.taxYear.trim()
+      : null;
 
   if (!content) {
     return NextResponse.json({ error: "content is required" }, { status: 400 });
@@ -55,6 +59,7 @@ export async function POST(
     contextLabels,
     modelString: persona.modelString,
     latestUserMessage: content,
+    taxYear,
   });
 
   const systemContent = `You are a helpful assistant with access to the user's personal context. Use it to give relevant, specific answers. Do not invent information not present in the context.\n\n${contextPackage}`;

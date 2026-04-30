@@ -11,6 +11,9 @@ type Persona = {
   displayName: string;
   costTier: string;
   avatarUrl?: string | null;
+  provider?: string | null;
+  modelString?: string | null;
+  description?: string | null;
 };
 type Conversation = {
   id: string;
@@ -38,6 +41,62 @@ type BranchCard = {
   createdAt: string;
   sourceMessage?: { id: string; content: string; role: string } | null;
 };
+
+const CONTEXT_PROMPTS: Record<string, string[]> = {
+  Medical: [
+    "What were my total medical expenses this year?",
+    "Which of my expenses are HSA or FSA eligible?",
+    "Summarize my recent doctor and pharmacy visits.",
+    "Do I have any unpaid medical bills?",
+  ],
+  Tax: [
+    "What deductions do I have available this tax year?",
+    "Summarize my charitable donations.",
+    "What business expenses can I claim?",
+    "Am I missing any common deductions?",
+  ],
+  "HSA/FSA": [
+    "What's my total HSA-eligible spending so far?",
+    "Which expenses are still pending reimbursement?",
+    "Show me my HSA spending by category.",
+    "What can I still submit for reimbursement?",
+  ],
+  Insurance: [
+    "What claims have I filed recently?",
+    "What's my out-of-pocket spending after insurance?",
+    "Which providers have I visited this year?",
+    "Are there any claims I should follow up on?",
+  ],
+  Other: [
+    "Summarize the documents in this context.",
+    "What patterns do you notice in my documents?",
+    "Are there any important dates or deadlines I should know about?",
+  ],
+};
+
+const GENERIC_PROMPTS = [
+  "What's in my documents?",
+  "Summarize what you know about my situation.",
+  "Are there any important items I should follow up on?",
+  "What patterns do you notice across my documents?",
+];
+
+function getSuggestedPrompts(contextLabels: string[]): string[] {
+  const seen = new Set<string>();
+  const prompts: string[] = [];
+  for (const label of contextLabels) {
+    const candidates = CONTEXT_PROMPTS[label] ?? GENERIC_PROMPTS;
+    for (const p of candidates) {
+      if (!seen.has(p)) { seen.add(p); prompts.push(p); }
+      if (prompts.length >= 4) return prompts;
+    }
+  }
+  for (const p of GENERIC_PROMPTS) {
+    if (!seen.has(p)) { seen.add(p); prompts.push(p); }
+    if (prompts.length >= 4) return prompts;
+  }
+  return prompts;
+}
 
 const PERSONA_AVATAR: Record<string, string> = {
   Quest: "🧭",
@@ -69,6 +128,7 @@ export default function ChatPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [input, setInput] = useState("");
   const [personaId, setPersonaId] = useState<string>("");
+  const [chatYear, setChatYear] = useState<string>("all");
   const [sending, setSending] = useState(false);
   const [creating, setCreating] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
@@ -83,6 +143,7 @@ export default function ChatPage() {
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ bottom: number; right: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const personaSelectRef = useRef<HTMLSelectElement | null>(null);
 
   const [selectionMenu, setSelectionMenu] = useState<{
     messageId: string;
@@ -98,6 +159,7 @@ export default function ChatPage() {
   const [capturing, setCapturing] = useState(false);
   const [renamingTitle, setRenamingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [toast, setToast] = useState<string | null>(null);
   const [showConversationsPanel, setShowConversationsPanel] = useState(false);
   const [showSymportPanel, setShowSymportPanel] = useState(false);
   const [symportCategory, setSymportCategory] = useState<string>("");
@@ -485,6 +547,8 @@ export default function ChatPage() {
       });
       if (res.ok) {
         setWiskrCaptureMessage(null);
+        setToast("Saved to Symport — it's now searchable in your documents.");
+        setTimeout(() => setToast(null), 4000);
       } else {
         const err = await res.json().catch(() => ({}));
         alert(err?.error ?? "Failed to capture");
@@ -503,7 +567,11 @@ export default function ChatPage() {
       const res = await fetch(`/api/wiskr/conversations/${selectedId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text, personaId: personaId || undefined }),
+        body: JSON.stringify({
+          content: text,
+          personaId: personaId || undefined,
+          taxYear: chatYear !== "all" ? chatYear : undefined,
+        }),
       });
       if (res.ok) {
         const { assistantMessage } = await res.json();
@@ -720,6 +788,24 @@ export default function ChatPage() {
                 >
                   + Contexts
                 </button>
+                <Link
+                  href="/settings/categories"
+                  className="text-xs text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300"
+                  title="Manage categories"
+                >
+                  Manage
+                </Link>
+                <select
+                  value={chatYear}
+                  onChange={(e) => setChatYear(e.target.value)}
+                  className="ml-auto text-xs rounded-full border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 px-2 py-0.5 focus:outline-none"
+                  title="Filter context by year"
+                >
+                  <option value="all">All years</option>
+                  {Array.from({ length: new Date().getFullYear() - 2019 }, (_, i) => String(new Date().getFullYear() - i)).map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
               </div>
               {contextChangedSuggestNewConversation && conversation && conversation.messages.length > 0 && (
                 <div className="px-3 py-2 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800 flex flex-wrap items-center gap-2 text-sm">
@@ -746,6 +832,32 @@ export default function ChatPage() {
                 </div>
               )}
               <div className="flex-1 overflow-auto p-4 space-y-4">
+                {conversation && conversation.messages.length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-full gap-6 py-8 text-center">
+                    {conversation.contexts.length === 0 ? (
+                      <div className="max-w-xs">
+                        <p className="text-zinc-500 dark:text-zinc-400 text-base mb-2">No contexts selected.</p>
+                        <p className="text-zinc-400 dark:text-zinc-500 text-sm">Add a context above so the AI can reference your documents.</p>
+                      </div>
+                    ) : (
+                      <div className="max-w-sm w-full">
+                        <p className="text-zinc-400 dark:text-zinc-500 text-sm mb-4">Try asking…</p>
+                        <div className="flex flex-col gap-2">
+                          {getSuggestedPrompts(conversation.contexts.map((c) => c.contextId)).map((prompt) => (
+                            <button
+                              key={prompt}
+                              type="button"
+                              onClick={() => setInput(prompt)}
+                              className="text-left rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:border-sky-300 dark:hover:border-sky-700 transition-colors"
+                            >
+                              {prompt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {conversation?.messages.map((m) => {
                   const isUser = m.role === "user";
                   const timeLabel = timeAgo(m.createdAt);
@@ -818,29 +930,53 @@ export default function ChatPage() {
                   className="w-full max-h-40 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-lg resize-y"
                 />
 
-                {/* Model selector, Context preview, context count, Send */}
+                {/* Context status: count + preview link */}
+                <div className="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+                  <span>
+                    {conversation?.contexts.length
+                      ? `${conversation.contexts.length} context${conversation.contexts.length === 1 ? "" : "s"} selected`
+                      : "No contexts selected"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={openContextPreview}
+                    disabled={!selectedId || contextPreviewLoading}
+                    className="underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-50 disabled:no-underline"
+                  >
+                    {contextPreviewLoading ? "Loading context…" : "Context preview"}
+                  </button>
+                </div>
+
+                {/* Model selector + Send */}
                 <div className="flex items-center flex-wrap gap-2">
-                  <div className="flex items-center gap-2 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 overflow-hidden text-sm">
-                    {currentPersona && (
-                      <>
-                        {currentPersona.avatarUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={currentPersona.avatarUrl}
-                            alt={currentPersona.displayName}
-                            className="h-10 w-10 object-cover"
-                          />
-                        ) : (
-                          <span className="inline-flex h-10 w-10 items-center justify-center bg-sky-100 dark:bg-sky-900 text-lg">
-                            {PERSONA_AVATAR[currentPersona.name] ?? "🤖"}
-                          </span>
-                        )}
-                      </>
-                    )}
+                  {currentPersona && (
+                    <button
+                      type="button"
+                      onClick={() => personaSelectRef.current?.showPicker?.() ?? personaSelectRef.current?.focus()}
+                      className="rounded-lg border border-zinc-300 dark:border-zinc-600 overflow-hidden shrink-0 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                      aria-label="Choose persona"
+                      title="Click to change persona"
+                    >
+                      {currentPersona.avatarUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={currentPersona.avatarUrl}
+                          alt={currentPersona.displayName}
+                          className="h-20 w-20 object-cover"
+                        />
+                      ) : (
+                        <span className="inline-flex h-20 w-20 items-center justify-center bg-sky-100 dark:bg-sky-900 text-4xl">
+                          {PERSONA_AVATAR[currentPersona.name] ?? "🤖"}
+                        </span>
+                      )}
+                    </button>
+                  )}
+                  <div className="flex flex-col gap-0.5">
                     <select
+                      ref={personaSelectRef}
                       value={personaId}
                       onChange={(e) => setPersonaId(e.target.value)}
-                      className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50 border-none outline-none text-base min-w-[8rem] py-1 pr-2"
+                      className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50 outline-none text-base w-48 px-2 py-1"
                       aria-label="Persona"
                     >
                       {personas.map((p) => (
@@ -849,21 +985,17 @@ export default function ChatPage() {
                         </option>
                       ))}
                     </select>
-                  </div>
-                  <div className="flex flex-col items-start gap-0.5 shrink-0">
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      {conversation?.contexts.length
-                        ? `${conversation.contexts.length} context${conversation.contexts.length === 1 ? "" : "s"} selected`
-                        : "No contexts selected"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={openContextPreview}
-                      disabled={!selectedId || contextPreviewLoading}
-                      className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-50 disabled:no-underline"
-                    >
-                      {contextPreviewLoading ? "Loading context…" : "Context preview"}
-                    </button>
+                    {currentPersona?.modelString && (
+                      <span className="text-sm text-zinc-400 dark:text-zinc-500 px-1">
+                        {currentPersona.modelString.split("/").pop()?.replace(/-/g, " ")}
+                        {currentPersona.provider ? ` · ${currentPersona.provider}` : ""}
+                      </span>
+                    )}
+                    {currentPersona?.description && (
+                      <span className="text-xs text-zinc-400 dark:text-zinc-500 px-1 leading-snug max-w-[24rem] block">
+                        {currentPersona.description}
+                      </span>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -1277,32 +1409,60 @@ export default function ChatPage() {
       {/* Context preview modal */}
       {showContextPreview && (
         <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl max-w-xl w-full max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-zinc-200 dark:border-zinc-800">
-              <h2 className="font-semibold text-sm">Context preview</h2>
+          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-zinc-800">
+              <h2 className="font-semibold text-base">What the AI can see</h2>
               <button
                 type="button"
                 onClick={() => setShowContextPreview(false)}
-                className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                className="text-xl leading-none p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
                 aria-label="Close context preview"
               >
                 ×
               </button>
             </div>
-            <div className="p-4 flex-1 overflow-auto">
+            <div className="px-5 py-4 flex-1 overflow-auto flex flex-col gap-5">
               {contextPreviewLoading ? (
-                <p className="text-sm text-zinc-500">Loading context…</p>
+                <p className="text-base text-zinc-500">Loading context…</p>
               ) : contextPreviewError ? (
-                <p className="text-sm text-red-500">{contextPreviewError}</p>
+                <p className="text-base text-red-500">{contextPreviewError}</p>
               ) : contextPreviewText ? (
-                <pre className="whitespace-pre-wrap text-xs text-zinc-800 dark:text-zinc-100">
-                  {contextPreviewText}
-                </pre>
+                contextPreviewText
+                  .split(/\n(?=\[CONTEXT:)/)
+                  .map((block, i) => {
+                    const headerMatch = block.match(/^\[CONTEXT:\s*(.+?)\]/);
+                    const label = headerMatch?.[1] ?? null;
+                    const body = block.replace(/^\[CONTEXT:\s*.+?\]\n?/, "").trim();
+                    const lines = body.split("\n").filter(Boolean);
+                    return (
+                      <div key={i}>
+                        {label && (
+                          <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500 mb-2">
+                            {label}
+                          </h3>
+                        )}
+                        <ul className="flex flex-col gap-1.5">
+                          {lines.map((line, j) => (
+                            <li key={j} className="text-base text-zinc-800 dark:text-zinc-100 leading-snug pl-3 border-l-2 border-zinc-200 dark:border-zinc-700">
+                              {line.replace(/^[-•]\s*/, "")}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })
               ) : (
-                <p className="text-sm text-zinc-500">No context available for this conversation.</p>
+                <p className="text-base text-zinc-500">No context available for this conversation.</p>
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm px-4 py-2.5 rounded-full shadow-lg pointer-events-none">
+          {toast}
         </div>
       )}
 

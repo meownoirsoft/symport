@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 function ChatIcon() {
   return (
@@ -41,16 +42,24 @@ function SettingsIcon() {
   );
 }
 
-const tabs = [
-  { href: "/chat", label: "Chat", icon: ChatIcon },
-  { href: "/hsa", label: "HSA/FSA", icon: HsaIcon },
-  { href: "/tax", label: "Tax", icon: TaxIcon },
-  { href: "/settings", label: "Settings", icon: SettingsIcon },
-] as const;
 
 export default function BottomNav() {
   const pathname = usePathname();
-  // Hide bottom nav on public/auth pages
+  const [hsaPending, setHsaPending] = useState(0);
+  const [taxUnclaimed, setTaxUnclaimed] = useState(0);
+
+  useEffect(() => {
+    fetch("/api/documents/action-counts")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data) {
+          setHsaPending(data.hsaPending ?? 0);
+          setTaxUnclaimed(data.taxUnclaimed ?? 0);
+        }
+      })
+      .catch(() => {});
+  }, [pathname]);
+
   if (pathname.startsWith("/login") || pathname.startsWith("/register")) {
     return null;
   }
@@ -58,10 +67,17 @@ export default function BottomNav() {
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(href + "/");
 
+  const tabs = [
+    { href: "/chat", label: "Chat", icon: ChatIcon, count: 0 },
+    { href: "/hsa", label: "HSA/FSA", icon: HsaIcon, count: hsaPending },
+    { href: "/tax", label: "Tax", icon: TaxIcon, count: taxUnclaimed },
+    { href: "/settings", label: "Settings", icon: SettingsIcon, count: 0 },
+  ] as const;
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur safe-area-pb">
       <div className="max-w-2xl mx-auto flex items-center justify-around h-14">
-        {tabs.map(({ href, label, icon: Icon }) => (
+        {tabs.map(({ href, label, icon: Icon, count }) => (
           <Link
             key={href}
             href={href}
@@ -72,7 +88,12 @@ export default function BottomNav() {
             }`}
           >
             <Icon />
-            {label}
+            <span className="flex items-baseline gap-0.5">
+              {label}
+              {count > 0 && (
+                <span className="text-[11px] font-normal">({count})</span>
+              )}
+            </span>
           </Link>
         ))}
       </div>
