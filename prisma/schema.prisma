@@ -59,6 +59,7 @@ model Conversation {
   branchCards           BranchCard[]     @relation("SourceConversation")
   branchConversations   BranchCard[]     @relation("BranchConversation")
   nextQuestions         NextQuestion[]
+  savedPrompts          SavedPrompt[]
 }
 
 model ConversationContext {
@@ -103,6 +104,14 @@ model BranchCard {
   branchConversation    Conversation? @relation("BranchConversation", fields: [conversationId], references: [id], onDelete: SetNull)
   status                String    @default("pending") // pending | active | dismissed
   createdAt             DateTime  @default(now())
+}
+
+model SavedPrompt {
+  id                   String        @id @default(cuid())
+  content              String
+  sourceConversationId String?
+  sourceConversation   Conversation? @relation(fields: [sourceConversationId], references: [id], onDelete: SetNull)
+  createdAt            DateTime      @default(now())
 }
 
 model NextQuestion {

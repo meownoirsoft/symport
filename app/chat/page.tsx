@@ -171,7 +171,8 @@ export default function ChatPage() {
   const [contextPreviewText, setContextPreviewText] = useState<string>("");
   const [contextPreviewLoading, setContextPreviewLoading] = useState(false);
   const [contextPreviewError, setContextPreviewError] = useState<string | null>(null);
-  const [branchDrawerMode, setBranchDrawerMode] = useState<"branches" | "conversations">("branches");
+  const [branchDrawerMode, setBranchDrawerMode] = useState<"chats" | "branches" | "queue">("chats");
+  const [savedPrompts, setSavedPrompts] = useState<{ id: string; content: string; sourceConversation: { id: string; title: string | null } | null; createdAt: string }[]>([]);
   const [contextChangedSuggestNewConversation, setContextChangedSuggestNewConversation] = useState(false);
 
   /** True when at least one previously selected context was removed (not when only adding). */
@@ -220,11 +221,36 @@ export default function ChatPage() {
     if (res.ok) setBranchCards(await res.json());
   }, [selectedId]);
 
+  const loadSavedPrompts = useCallback(async () => {
+    const res = await fetch("/api/saved-prompts");
+    if (res.ok) setSavedPrompts(await res.json());
+  }, []);
+
+  const savePromptToQueue = async (content: string) => {
+    const res = await fetch("/api/saved-prompts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, sourceConversationId: selectedId }),
+    });
+    if (res.ok) {
+      const newPrompt = await res.json();
+      setSavedPrompts((prev) => [newPrompt, ...prev]);
+      setBranchDrawerMode("queue");
+      setBranchDrawerOpen(true);
+    }
+  };
+
+  const deleteSavedPrompt = async (id: string) => {
+    setSavedPrompts((prev) => prev.filter((p) => p.id !== id));
+    await fetch(`/api/saved-prompts/${id}`, { method: "DELETE" });
+  };
+
   useEffect(() => {
     loadPersonas();
     loadConversations();
     loadCategories();
-  }, [loadPersonas, loadConversations, loadCategories]);
+    loadSavedPrompts();
+  }, [loadPersonas, loadConversations, loadCategories, loadSavedPrompts]);
 
   // Persist selected conversation so it survives navigation away and back.
   useEffect(() => {
@@ -727,35 +753,16 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Right: Chats label + chevron + Branches pill */}
+        {/* Right: Panel button */}
         <div className="flex items-center justify-end gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => setShowConversationsPanel(true)}
+            onClick={() => setBranchDrawerOpen((o) => !o)}
             className="text-sm text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100"
+            title="Conversations, branches & prompt queue"
           >
-            Chats
+            Panel »
           </button>
-          <button
-            type="button"
-            className="text-3xl px-1 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-            onClick={() => setShowConversationsPanel(true)}
-            title="Open conversations"
-          >
-            »
-          </button>
-          {selectedId && branchCards.length > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                setBranchDrawerMode("branches");
-                setBranchDrawerOpen(true);
-              }}
-              className="text-xs rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 px-2 py-0.5 font-medium"
-            >
-              Branches ({branchCards.length})
-            </button>
-          )}
         </div>
       </header>
 
@@ -1028,7 +1035,7 @@ export default function ChatPage() {
               }}
             />
             <div
-              className="fixed z-40 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg py-1 min-w-[140px]"
+              className="fixed z-40 rounded-lg border border-zinc-200 dark:border-zinc-600 bg-white dark:bg-zinc-950 shadow-xl py-1 w-max"
               style={{ bottom: menuPosition.bottom, right: menuPosition.right }}
             >
               {(() => {
@@ -1039,19 +1046,29 @@ export default function ChatPage() {
                     <button
                       type="button"
                       onClick={() => followUpLater(msg.id, msg.content)}
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                      className="block text-left px-3 py-2 text-sm whitespace-nowrap hover:bg-zinc-100 dark:hover:bg-zinc-800"
                     >
                       Follow up (branch)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { savePromptToQueue(msg.content); setMessageMenuId(null); }}
+                      className="block text-left px-3 py-2 text-sm whitespace-nowrap hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      Save to prompt queue
                     </button>
                     {msg.role === "assistant" && (
                       <button
                         type="button"
                         onClick={() => openWiskrCapture(msg.id, msg.content)}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                        className="block text-left px-3 py-2 text-sm whitespace-nowrap hover:bg-zinc-100 dark:hover:bg-zinc-800"
                       >
-                        Wiskr this (import doc)
+                        Add to my documents
                       </button>
                     )}
+                    <p className="px-3 py-2 text-xs text-zinc-400 dark:text-zinc-500 border-t border-zinc-100 dark:border-zinc-800 mt-1">
+                      Highlight text for more actions
+                    </p>
                   </>
                 );
               })()}
@@ -1074,9 +1091,20 @@ export default function ChatPage() {
               }}
             />
             <div
-              className="fixed z-40 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg py-1 min-w-[140px]"
+              className="fixed z-40 rounded-lg border border-zinc-200 dark:border-zinc-600 bg-white dark:bg-zinc-950 shadow-xl py-1 w-max"
               style={{ bottom: selectionMenu.bottom, right: selectionMenu.right }}
             >
+              <button
+                type="button"
+                onClick={() => {
+                  savePromptToQueue(selectionMenu.text);
+                  setSelectionMenu(null);
+                  window.getSelection()?.removeAllRanges();
+                }}
+                className="block text-left px-3 py-2 text-sm whitespace-nowrap hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              >
+                Save to prompt queue
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -1084,7 +1112,7 @@ export default function ChatPage() {
                   setSelectionMenu(null);
                   window.getSelection()?.removeAllRanges();
                 }}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                className="block text-left px-3 py-2 text-sm whitespace-nowrap hover:bg-zinc-100 dark:hover:bg-zinc-800"
               >
                 Follow up (branch)
               </button>
@@ -1096,9 +1124,9 @@ export default function ChatPage() {
                     setSelectionMenu(null);
                     window.getSelection()?.removeAllRanges();
                   }}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                  className="block text-left px-3 py-2 text-sm whitespace-nowrap hover:bg-zinc-100 dark:hover:bg-zinc-800"
                 >
-                  Wiskr this (import doc)
+                  Add to my documents
                 </button>
               )}
             </div>
@@ -1367,9 +1395,9 @@ export default function ChatPage() {
       {wiskrCaptureMessage && (
         <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl max-w-sm w-full p-4 flex flex-col gap-4">
-            <h2 className="font-semibold text-lg">Wiskr this response</h2>
+            <h2 className="font-semibold text-lg">Add to my documents</h2>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Add this AI response to a context so future conversations can use it.
+              Save this response as a document so future conversations can reference it.
             </p>
             <div>
               <label className="block text-sm font-medium mb-1">Context</label>
@@ -1481,8 +1509,19 @@ export default function ChatPage() {
                 <div className="inline-flex rounded-full border border-zinc-300 dark:border-zinc-700 text-xs overflow-hidden">
                   <button
                     type="button"
-                    onClick={() => setBranchDrawerMode("branches")}
+                    onClick={() => setBranchDrawerMode("chats")}
                     className={`px-3 py-1 ${
+                      branchDrawerMode === "chats"
+                        ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
+                        : "bg-transparent text-zinc-600 dark:text-zinc-300"
+                    }`}
+                  >
+                    Chats
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBranchDrawerMode("branches")}
+                    className={`px-3 py-1 border-l border-zinc-300 dark:border-zinc-700 ${
                       branchDrawerMode === "branches"
                         ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
                         : "bg-transparent text-zinc-600 dark:text-zinc-300"
@@ -1492,14 +1531,14 @@ export default function ChatPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setBranchDrawerMode("conversations")}
+                    onClick={() => { setBranchDrawerMode("queue"); loadSavedPrompts(); }}
                     className={`px-3 py-1 border-l border-zinc-300 dark:border-zinc-700 ${
-                      branchDrawerMode === "conversations"
+                      branchDrawerMode === "queue"
                         ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
                         : "bg-transparent text-zinc-600 dark:text-zinc-300"
                     }`}
                   >
-                    Conversations
+                    Queue{savedPrompts.length > 0 && ` (${savedPrompts.length})`}
                   </button>
                 </div>
               </div>
@@ -1513,20 +1552,29 @@ export default function ChatPage() {
               </button>
             </div>
             <ul className="flex-1 overflow-auto p-3 space-y-3">
-              {branchDrawerMode === "branches" ? (
-                branchCards.length === 0 ? (
-                  <li className="text-sm text-zinc-500 py-4">
-                    No branch cards. Use ⋯ on a message and choose “Follow up later”.
-                  </li>
-                ) : (
-                  branchCards.map((card) => (
-                    <li
-                      key={card.id}
-                      className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2"
-                    >
-                      <p className="text-sm line-clamp-2">
-                        {card.triggerText || card.sourceMessage?.content || "—"}
-                      </p>
+              {branchDrawerMode === "chats" && <>
+                {conversations.length === 0
+                  ? <li className="text-sm text-zinc-500 py-4">No chats yet. Start a new conversation to see it here.</li>
+                  : conversations.map((c) => (
+                    <li key={c.id} className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1">
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedId(c.id); setBranchDrawerOpen(false); }}
+                        className={`w-full text-left text-sm font-medium hover:underline ${c.id === selectedId ? "text-sky-600 dark:text-sky-400" : ""}`}
+                      >
+                        {c.title ?? "Untitled"} ({c._count.messages})
+                      </button>
+                      <p className="text-xs text-zinc-500">Updated {timeAgo(c.updatedAt)}</p>
+                    </li>
+                  ))
+                }
+              </>}
+              {branchDrawerMode === "branches" && <>
+                {branchCards.length === 0
+                  ? <li className="text-sm text-zinc-500 py-4">No branch cards. Use ⋯ on a message and choose &quot;Follow up later&quot;.</li>
+                  : branchCards.map((card) => (
+                    <li key={card.id} className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
+                      <p className="text-sm line-clamp-2">{card.triggerText || card.sourceMessage?.content || "—"}</p>
                       <div className="flex gap-2">
                         <button
                           type="button"
@@ -1547,39 +1595,39 @@ export default function ChatPage() {
                       </div>
                     </li>
                   ))
-                )
-              ) : (() => {
-                const branchConversations = conversations.filter(
-                  (c) => c.parentConversation && c.parentConversation.id === selectedId
-                );
-                if (branchConversations.length === 0) {
-                  return (
-                    <li className="text-sm text-zinc-500 py-4">
-                      No branch conversations yet. Branches you open will appear here.
-                    </li>
-                  );
                 }
-                return branchConversations.map((c) => (
-                  <li
-                    key={c.id}
-                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedId(c.id);
-                        setBranchDrawerOpen(false);
-                      }}
-                      className="w-full text-left text-sm font-medium hover:underline"
-                    >
-                      {c.title ?? "Untitled"} ({c._count.messages})
-                    </button>
-                    <p className="text-xs text-zinc-500">
-                      Child of this conversation • Updated {timeAgo(c.updatedAt)}
-                    </p>
-                  </li>
-                ));
-              })()}
+              </>}
+              {branchDrawerMode === "queue" && <>
+                {savedPrompts.length === 0
+                  ? <li className="text-sm text-zinc-500 py-4">No saved prompts yet. Highlight any text in a message and choose &quot;Save to prompt queue&quot;.</li>
+                  : savedPrompts.map((p) => (
+                    <li key={p.id} className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
+                      <p className="text-sm">{p.content}</p>
+                      {p.sourceConversation && (
+                        <p className="text-xs text-zinc-400 dark:text-zinc-500 truncate">
+                          From: {p.sourceConversation.title ?? "Untitled"}
+                        </p>
+                      )}
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => { setInput(p.content); setBranchDrawerOpen(false); }}
+                          className="text-sm rounded-lg bg-sky-600 text-white px-3 py-1.5 font-medium"
+                        >
+                          Use
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteSavedPrompt(p.id)}
+                          className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </li>
+                  ))
+                }
+              </>}
             </ul>
           </div>
         </div>
