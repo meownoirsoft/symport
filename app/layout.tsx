@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
+import OnboardingModal from "@/components/OnboardingModal";
 
 export const metadata: Metadata = {
   title: "Symport",
@@ -17,6 +18,7 @@ export default function RootLayout({
       <body className="antialiased font-sans pb-14">
         {children}
         <BottomNav />
+        <OnboardingModal />
       </body>
     </html>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { timeAgo } from "@/lib/time-ago";
@@ -41,6 +41,21 @@ type BranchCard = {
   createdAt: string;
   sourceMessage?: { id: string; content: string; role: string } | null;
 };
+
+const CONTEXT_COLORS: Record<string, { chip: string; rgb: string }> = {
+  Medical:   { chip: "bg-sky-100 text-sky-800 hover:bg-sky-200 dark:bg-sky-900/60 dark:text-sky-200 dark:hover:bg-sky-800",         rgb: "14,165,233" },
+  Tax:       { chip: "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/60 dark:text-amber-200 dark:hover:bg-amber-800", rgb: "245,158,11" },
+  "HSA/FSA": { chip: "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/60 dark:text-emerald-200 dark:hover:bg-emerald-800", rgb: "16,185,129" },
+  Insurance: { chip: "bg-violet-100 text-violet-800 hover:bg-violet-200 dark:bg-violet-900/60 dark:text-violet-200 dark:hover:bg-violet-800", rgb: "139,92,246" },
+};
+const DEFAULT_CHIP_CLASS = "bg-zinc-200 text-zinc-700 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600";
+
+function contextBarStyle(contextIds: string[]): React.CSSProperties {
+  if (contextIds.length === 0) return {};
+  const rgbs = contextIds.map((id) => CONTEXT_COLORS[id]?.rgb ?? "161,161,170");
+  if (rgbs.length === 1) return { backgroundColor: `rgba(${rgbs[0]},0.09)` };
+  return { background: `linear-gradient(to right, rgba(${rgbs[0]},0.13), rgba(${rgbs[rgbs.length - 1]},0.13))` };
+}
 
 const CONTEXT_PROMPTS: Record<string, string[]> = {
   Medical: [
@@ -172,6 +187,7 @@ export default function ChatPage() {
   const [contextPreviewLoading, setContextPreviewLoading] = useState(false);
   const [contextPreviewError, setContextPreviewError] = useState<string | null>(null);
   const [branchDrawerMode, setBranchDrawerMode] = useState<"chats" | "branches" | "queue">("chats");
+  const [panelSearch, setPanelSearch] = useState("");
   const [savedPrompts, setSavedPrompts] = useState<{ id: string; content: string; sourceConversation: { id: string; title: string | null } | null; createdAt: string }[]>([]);
   const [contextChangedSuggestNewConversation, setContextChangedSuggestNewConversation] = useState(false);
 
@@ -227,16 +243,27 @@ export default function ChatPage() {
   }, []);
 
   const savePromptToQueue = async (content: string) => {
-    const res = await fetch("/api/saved-prompts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, sourceConversationId: selectedId }),
-    });
-    if (res.ok) {
-      const newPrompt = await res.json();
-      setSavedPrompts((prev) => [newPrompt, ...prev]);
+    try {
+      const res = await fetch("/api/saved-prompts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, sourceConversationId: selectedId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setToast("Failed to save prompt: " + (err.error ?? res.status));
+        setTimeout(() => setToast(null), 4000);
+        return;
+      }
+      await loadSavedPrompts();
+      setPanelSearch("");
       setBranchDrawerMode("queue");
       setBranchDrawerOpen(true);
+      setToast("Saved to prompt queue.");
+      setTimeout(() => setToast(null), 3000);
+    } catch (e) {
+      setToast("Failed to save prompt: " + (e instanceof Error ? e.message : "network error"));
+      setTimeout(() => setToast(null), 4000);
     }
   };
 
@@ -600,11 +627,12 @@ export default function ChatPage() {
         }),
       });
       if (res.ok) {
-        const { assistantMessage } = await res.json();
+        const { assistantMessage, generatedTitle } = await res.json();
         setConversation((prev) =>
           prev
             ? {
                 ...prev,
+                title: generatedTitle ?? prev.title,
                 messages: [
                   ...prev.messages,
                   { id: "user", role: "user", content: text, createdAt: new Date().toISOString() },
@@ -613,6 +641,11 @@ export default function ChatPage() {
               }
             : null
         );
+        if (generatedTitle) {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === selectedId ? { ...c, title: generatedTitle } : c))
+          );
+        }
       } else {
         const err = await res.json().catch(() => ({}));
         setInput(text);
@@ -657,7 +690,7 @@ export default function ChatPage() {
     personas.find((p) => p.id === personaId) ?? (personas.length ? personas[0] : null);
 
   return (
-    <div className="h-[calc(100vh-3.5rem)] bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col max-w-2xl mx-auto">
+    <div className="h-[calc(100vh-3.5rem)] bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 flex flex-col max-w-2xl mx-auto">
       <header className="border-b border-zinc-200 dark:border-zinc-800 px-4 py-3 grid grid-cols-[auto_1fr_auto] items-center gap-2">
         {/* Left: chevron + Symport label */}
         <div className="flex items-center gap-1">
@@ -758,10 +791,10 @@ export default function ChatPage() {
           <button
             type="button"
             onClick={() => setBranchDrawerOpen((o) => !o)}
-            className="text-sm text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100"
+            className="flex items-center gap-1 text-sm font-medium rounded-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
             title="Conversations, branches & prompt queue"
           >
-            Panel »
+            Panel <span className="opacity-60">›</span>
           </button>
         </div>
       </header>
@@ -775,13 +808,16 @@ export default function ChatPage() {
           ) : (
             <>
               {/* Top bar: context chips (tap to remove) + add/edit */}
-              <div className="px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center gap-1.5">
+              <div
+                className="px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center gap-1.5 transition-colors duration-300"
+                style={contextBarStyle((conversation?.contexts ?? []).map((c) => c.contextId))}
+              >
                 {conversation?.contexts.map((c) => (
                   <button
                     key={c.contextId}
                     type="button"
                     onClick={() => removeContext(c.contextId)}
-                    className="text-xs rounded-full bg-zinc-200 dark:bg-zinc-700 px-2 py-0.5 hover:bg-zinc-300 dark:hover:bg-zinc-600"
+                    className={`text-xs rounded-full px-2.5 py-1 font-medium transition-colors ${CONTEXT_COLORS[c.contextId]?.chip ?? DEFAULT_CHIP_CLASS}`}
                     title="Remove context"
                   >
                     {c.contextId} ×
@@ -838,7 +874,7 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
-              <div className="flex-1 overflow-auto p-4 space-y-4">
+              <div className="flex-1 overflow-auto p-4 space-y-4 bg-zinc-50 dark:bg-zinc-950">
                 {conversation && conversation.messages.length === 0 && (
                   <div className="flex flex-col items-center justify-center h-full gap-6 py-8 text-center">
                     {conversation.contexts.length === 0 ? (
@@ -923,19 +959,31 @@ export default function ChatPage() {
               {/* Bottom input bar: message box full width, then model + send row */}
               <div className="shrink-0 p-3 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
                 {/* Message box: full width */}
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      sendMessage();
-                    }
-                  }}
-                  placeholder="Message..."
-                  rows={2}
-                  className="w-full max-h-40 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-lg resize-y"
-                />
+                <div className="relative">
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                      }
+                    }}
+                    placeholder="Message..."
+                    rows={2}
+                    className="w-full max-h-40 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 pr-8 text-lg resize-y"
+                  />
+                  {input && (
+                    <button
+                      type="button"
+                      onClick={() => setInput("")}
+                      className="absolute top-1.5 right-1.5 w-8 h-8 flex items-center justify-center rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-300 text-xl font-medium"
+                      aria-label="Clear input"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
 
                 {/* Context status: count + preview link */}
                 <div className="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
@@ -1495,7 +1543,7 @@ export default function ChatPage() {
       )}
 
       {/* Branch cards / branch conversations drawer (right) */}
-      {branchDrawerOpen && selectedId && (
+      {branchDrawerOpen && (selectedId || branchDrawerMode === "queue") && (
         <div className="fixed inset-0 z-20 flex justify-end">
           <div
             className="absolute inset-0 bg-black/30"
@@ -1509,7 +1557,7 @@ export default function ChatPage() {
                 <div className="inline-flex rounded-full border border-zinc-300 dark:border-zinc-700 text-xs overflow-hidden">
                   <button
                     type="button"
-                    onClick={() => setBranchDrawerMode("chats")}
+                    onClick={() => { setBranchDrawerMode("chats"); setPanelSearch(""); }}
                     className={`px-3 py-1 ${
                       branchDrawerMode === "chats"
                         ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
@@ -1520,7 +1568,7 @@ export default function ChatPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setBranchDrawerMode("branches")}
+                    onClick={() => { setBranchDrawerMode("branches"); setPanelSearch(""); }}
                     className={`px-3 py-1 border-l border-zinc-300 dark:border-zinc-700 ${
                       branchDrawerMode === "branches"
                         ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
@@ -1531,7 +1579,7 @@ export default function ChatPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setBranchDrawerMode("queue"); loadSavedPrompts(); }}
+                    onClick={() => { setBranchDrawerMode("queue"); setPanelSearch(""); loadSavedPrompts(); }}
                     className={`px-3 py-1 border-l border-zinc-300 dark:border-zinc-700 ${
                       branchDrawerMode === "queue"
                         ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
@@ -1551,82 +1599,100 @@ export default function ChatPage() {
                 ×
               </button>
             </div>
+            <div className="px-3 pt-3 pb-1">
+              <input
+                type="search"
+                value={panelSearch}
+                onChange={(e) => setPanelSearch(e.target.value)}
+                placeholder={branchDrawerMode === "chats" ? "Search chats…" : branchDrawerMode === "branches" ? "Search branches…" : "Search queue…"}
+                className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              />
+            </div>
             <ul className="flex-1 overflow-auto p-3 space-y-3">
               {branchDrawerMode === "chats" && <>
-                {conversations.length === 0
-                  ? <li className="text-sm text-zinc-500 py-4">No chats yet. Start a new conversation to see it here.</li>
-                  : conversations.map((c) => (
-                    <li key={c.id} className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1">
-                      <button
-                        type="button"
-                        onClick={() => { setSelectedId(c.id); setBranchDrawerOpen(false); }}
-                        className={`w-full text-left text-sm font-medium hover:underline ${c.id === selectedId ? "text-sky-600 dark:text-sky-400" : ""}`}
-                      >
-                        {c.title ?? "Untitled"} ({c._count.messages})
-                      </button>
-                      <p className="text-xs text-zinc-500">Updated {timeAgo(c.updatedAt)}</p>
-                    </li>
-                  ))
-                }
+                {(() => {
+                  const q = panelSearch.toLowerCase();
+                  const filtered = q ? conversations.filter((c) => (c.title ?? "Untitled").toLowerCase().includes(q)) : conversations;
+                  return filtered.length === 0
+                    ? <li className="text-sm text-zinc-500 py-4">{q ? "No chats match your search." : "No chats yet. Start a new conversation to see it here."}</li>
+                    : filtered.map((c) => (
+                      <li key={c.id} className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1">
+                        <button
+                          type="button"
+                          onClick={() => { setSelectedId(c.id); setBranchDrawerOpen(false); }}
+                          className={`w-full text-left text-sm font-medium hover:underline ${c.id === selectedId ? "text-sky-600 dark:text-sky-400" : ""}`}
+                        >
+                          {c.title ?? "Untitled"} ({c._count.messages})
+                        </button>
+                        <p className="text-xs text-zinc-500">Updated {timeAgo(c.updatedAt)}</p>
+                      </li>
+                    ));
+                })()}
               </>}
               {branchDrawerMode === "branches" && <>
-                {branchCards.length === 0
-                  ? <li className="text-sm text-zinc-500 py-4">No branch cards. Use ⋯ on a message and choose &quot;Follow up later&quot;.</li>
-                  : branchCards.map((card) => (
-                    <li key={card.id} className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
-                      <p className="text-sm line-clamp-2">{card.triggerText || card.sourceMessage?.content || "—"}</p>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openBranchAsConversation(card)}
-                          disabled={!!openingCardId}
-                          className="text-sm rounded-lg bg-sky-600 text-white px-3 py-1.5 font-medium disabled:opacity-50"
-                        >
-                          {openingCardId === card.id ? "…" : "Open"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => dismissBranchCard(card.id)}
-                          disabled={!!dismissingCardId}
-                          className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5 disabled:opacity-50"
-                        >
-                          Dismiss
-                        </button>
-                      </div>
-                    </li>
-                  ))
-                }
+                {(() => {
+                  const q = panelSearch.toLowerCase();
+                  const filtered = q ? branchCards.filter((c) => (c.triggerText || c.sourceMessage?.content || "").toLowerCase().includes(q)) : branchCards;
+                  return filtered.length === 0
+                    ? <li className="text-sm text-zinc-500 py-4">{q ? "No branches match your search." : "No branch cards. Use ⋯ on a message and choose \"Follow up later\"."}</li>
+                    : filtered.map((card) => (
+                      <li key={card.id} className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
+                        <p className="text-sm line-clamp-2">{card.triggerText || card.sourceMessage?.content || "—"}</p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openBranchAsConversation(card)}
+                            disabled={!!openingCardId}
+                            className="text-sm rounded-lg bg-sky-600 text-white px-3 py-1.5 font-medium disabled:opacity-50"
+                          >
+                            {openingCardId === card.id ? "…" : "Open"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => dismissBranchCard(card.id)}
+                            disabled={!!dismissingCardId}
+                            className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5 disabled:opacity-50"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </li>
+                    ));
+                })()}
               </>}
               {branchDrawerMode === "queue" && <>
-                {savedPrompts.length === 0
-                  ? <li className="text-sm text-zinc-500 py-4">No saved prompts yet. Highlight any text in a message and choose &quot;Save to prompt queue&quot;.</li>
-                  : savedPrompts.map((p) => (
-                    <li key={p.id} className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
-                      <p className="text-sm">{p.content}</p>
-                      {p.sourceConversation && (
-                        <p className="text-xs text-zinc-400 dark:text-zinc-500 truncate">
-                          From: {p.sourceConversation.title ?? "Untitled"}
-                        </p>
-                      )}
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => { setInput(p.content); setBranchDrawerOpen(false); }}
-                          className="text-sm rounded-lg bg-sky-600 text-white px-3 py-1.5 font-medium"
-                        >
-                          Use
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteSavedPrompt(p.id)}
-                          className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </li>
-                  ))
-                }
+                {(() => {
+                  const q = panelSearch.toLowerCase();
+                  const filtered = q ? savedPrompts.filter((p) => p.content.toLowerCase().includes(q)) : savedPrompts;
+                  return filtered.length === 0
+                    ? <li className="text-sm text-zinc-500 py-4">{q ? "No prompts match your search." : "No saved prompts yet. Highlight any text in a message and choose \"Save to prompt queue\"."}</li>
+                    : filtered.map((p) => (
+                      <li key={p.id} className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
+                        <p className="text-sm">{p.content}</p>
+                        {p.sourceConversation && (
+                          <p className="text-xs text-zinc-400 dark:text-zinc-500 truncate">
+                            From: {p.sourceConversation.title ?? "Untitled"}
+                          </p>
+                        )}
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => { setInput(p.content); setBranchDrawerOpen(false); }}
+                            className="text-sm rounded-lg bg-sky-600 text-white px-3 py-1.5 font-medium"
+                          >
+                            Use
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteSavedPrompt(p.id)}
+                            className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </li>
+                    ));
+                })()}
               </>}
             </ul>
           </div>

@@ -4,6 +4,13 @@ import { openRouterChat, type OpenRouterMessage } from "@/lib/openrouter";
 import { buildContextPackageForConversation } from "@/lib/context-assembly";
 import { getModelCapability } from "@/lib/model-capabilities";
 
+function autoTitle(content: string): string {
+  const words = content.trim().split(/\s+/);
+  const snippet = words.slice(0, 7).join(" ");
+  const title = words.length > 7 ? snippet + "…" : snippet;
+  return title.charAt(0).toUpperCase() + title.slice(1);
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -120,13 +127,26 @@ export async function POST(
     }),
   ]);
 
-  await prisma.conversation.update({
-    where: { id: conversationId },
-    data: { updatedAt: new Date() },
-  });
+  const isFirstExchange = conversation.messages.length === 0;
+  const needsTitle = isFirstExchange && (!conversation.title || conversation.title === "New conversation");
+
+  let generatedTitle: string | null = null;
+  if (needsTitle) {
+    generatedTitle = autoTitle(content);
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { title: generatedTitle, updatedAt: new Date() },
+    });
+  } else {
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { updatedAt: new Date() },
+    });
+  }
 
   return NextResponse.json({
     userMessage: userMsg,
     assistantMessage: assistantMsg,
+    generatedTitle,
   });
 }

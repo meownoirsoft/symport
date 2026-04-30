@@ -159,31 +159,82 @@ function describeDocument(data: Record<string, unknown>, detailLevel: DetailLeve
 function buildContextSummary(
   docs: { tags: string[]; extractedData: unknown }[],
   label: string,
-  overrides: Record<string, string | null>
+  overrides: Record<string, string | null>,
+  taxYear?: string | null
 ): string {
-  const matching = docs.filter((doc) => {
+  let matching = docs.filter((doc) => {
     const tags = (doc.tags ?? []).map((t) => String(t).trim()).filter(Boolean);
     if (label === "Other") return documentBelongsToOnlyOther(tags, overrides);
     return tags.some((t) => getCategoryForTag(t, overrides) === label);
   });
+  if (taxYear) {
+    matching = matching.filter((doc) => {
+      const d = (doc.extractedData as Record<string, unknown>)?.date;
+      return typeof d === "string" && d.startsWith(taxYear);
+    });
+  }
   if (!matching.length) return "";
 
   let totalAmount = 0;
   let amountCount = 0;
   let hsaEligible = 0;
+  const dates: string[] = [];
+  const providerFreq = new Map<string, number>();
 
   for (const doc of matching) {
     const data = (doc.extractedData as Record<string, unknown>) ?? {};
+
     const rawAmt = data.amount ?? data.copay_amount ?? data.patient_responsibility ?? data.amount_paid;
     const amt = rawAmt != null ? parseFloat(String(rawAmt)) : NaN;
-    if (!isNaN(amt)) { totalAmount += amt; amountCount++; }
+    if (!isNaN(amt) && amt > 0) { totalAmount += amt; amountCount++; }
+
     if (data.hsa_fsa_eligible === true) hsaEligible++;
+
+    const dateVal = typeof data.date === "string" ? data.date : null;
+    if (dateVal) dates.push(dateVal);
+
+    for (const field of ["provider", "vendor", "pharmacy", "insurer", "party"] as const) {
+      const v = data[field];
+      if (typeof v === "string" && v.trim()) {
+        const key = v.trim();
+        providerFreq.set(key, (providerFreq.get(key) ?? 0) + 1);
+      }
+    }
   }
 
-  const parts: string[] = [`${matching.length} docs`];
-  if (amountCount > 0) parts.push(`$${totalAmount.toFixed(2)} total`);
+  const parts: string[] = [`${matching.length} document${matching.length !== 1 ? "s" : ""}`];
+
+  if (dates.length > 0) {
+    const sorted = dates.slice().sort();
+    const earliest = sorted[0];
+    const latest = sorted[sorted.length - 1];
+    if (earliest === latest) {
+      parts.push(`date: ${earliest}`);
+    } else {
+      const ey = earliest.slice(0, 4);
+      const ly = latest.slice(0, 4);
+      const range =
+        ey === ly
+          ? `${earliest.slice(5)} to ${latest.slice(5)} ${ly}`
+          : `${earliest} to ${latest}`;
+      parts.push(`dates: ${range}`);
+    }
+  }
+
+  if (amountCount > 0) {
+    parts.push(`$${totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} total spend`);
+  }
   if (hsaEligible > 0) parts.push(`${hsaEligible} HSA/FSA eligible`);
-  return `Summary: ${parts.join(" — ")}`;
+
+  if (providerFreq.size > 0) {
+    const top = [...providerFreq.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name]) => name);
+    parts.push(`key providers/vendors: ${top.join(", ")}`);
+  }
+
+  return `Overview: ${parts.join(" · ")}`;
 }
 
 function sameContextSet(activeIds: string[] | null | undefined, currentLabels: ContextLabel[]): boolean {
@@ -419,7 +470,7 @@ export async function buildContextPackageForConversation(
 
     if (!lines.length) continue;
 
-    const summary = buildContextSummary(allDocsForSummary, label, overrides);
+    const summary = buildContextSummary(allDocsForSummary, label, overrides, taxYear);
     const header = `[CONTEXT: ${label}]`;
     const sectionLines = summary ? [header, summary, ...lines] : [header, ...lines];
     const sectionTokens = estimateLinesTokens(sectionLines);

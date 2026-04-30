@@ -101,9 +101,17 @@ export async function PATCH(
         ? body.tax_status
         : undefined;
 
+  const noteText =
+    body.noteText === null || body.noteText === undefined
+      ? undefined
+      : typeof body.noteText === "string"
+        ? body.noteText.trim() || null
+        : undefined;
+
   const data: {
     rotation?: number;
     extractionNotes?: string | null;
+    noteText?: string | null;
     extractedData?: Record<string, unknown>;
     searchText?: string | null;
     tags?: string[];
@@ -111,6 +119,7 @@ export async function PATCH(
   } = {};
   if (rotation !== undefined) data.rotation = rotation;
   if (extractionNotes !== undefined) data.extractionNotes = extractionNotes;
+  if (noteText !== undefined) data.noteText = noteText;
   if (tags !== undefined) data.tags = tags;
   if (docStatus !== undefined) data.status = docStatus;
 

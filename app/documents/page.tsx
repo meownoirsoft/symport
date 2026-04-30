@@ -42,6 +42,9 @@ function DocumentsContent() {
   const [hsaFsaFilter, setHsaFsaFilter] = useState("");
   const [taxYearFilter, setTaxYearFilter] = useState("");
   const [categoriesWithCounts, setCategoriesWithCounts] = useState<CategoryWithCount[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkWorking, setBulkWorking] = useState(false);
+  const [bulkTagInput, setBulkTagInput] = useState("");
 
   // Sync tag and category from URL on load and when URL changes
   useEffect(() => {
@@ -54,7 +57,7 @@ function DocumentsContent() {
 
   const queryString = useCallback(() => {
     const params = new URLSearchParams();
-    if (q) params.set("q", q);
+    if (q) { params.set("q", q); params.set("semantic", "1"); }
     if (tagFilter.trim()) params.set("tag", tagFilter.trim());
     if (categoryFilter.trim()) params.set("category", categoryFilter.trim());
     if (taxCategoryFilter.trim()) params.set("tax_category", taxCategoryFilter.trim());
@@ -132,12 +135,46 @@ function DocumentsContent() {
     router.replace("/documents", { scroll: false });
   }, [router]);
 
+  async function bulkAction(action: string, extra: Record<string, string> = {}) {
+    if (!selected.size || bulkWorking) return;
+    if (action === "delete" && !confirm(`Delete ${selected.size} document${selected.size !== 1 ? "s" : ""}? This cannot be undone.`)) return;
+    setBulkWorking(true);
+    try {
+      const res = await fetch("/api/documents/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selected], action, ...extra }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      if (action === "delete") {
+        setDocs((prev) => prev.filter((d) => !selected.has(d.id)));
+      } else if (action === "addTag") {
+        const tag = extra.tag;
+        setDocs((prev) => prev.map((d) => selected.has(d.id) && !d.tags?.includes(tag) ? { ...d, tags: [...(d.tags ?? []), tag] } : d));
+        setBulkTagInput("");
+      }
+      setSelected(new Set());
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Bulk action failed");
+    } finally {
+      setBulkWorking(false);
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
   // Fetch documents when filters change
   useEffect(() => {
     setLoading(true);
     fetch(`/api/documents?${queryString()}`)
       .then((r) => r.json())
-      .then(setDocs)
+      .then((data) => { setDocs(data); setSelected(new Set()); })
       .finally(() => setLoading(false));
   }, [queryString]);
 
@@ -158,12 +195,26 @@ function DocumentsContent() {
           </Link>
           <h1 className="text-xl font-semibold">Documents</h1>
         </div>
-        <Link
-          href="/settings/categories"
-          className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-        >
-          Manage categories
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/insights"
+            className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+          >
+            Insights
+          </Link>
+          <Link
+            href="/import/obsidian"
+            className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+          >
+            Import
+          </Link>
+          <Link
+            href="/settings/categories"
+            className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+          >
+            Manage categories
+          </Link>
+        </div>
       </header>
       <main className="max-w-lg mx-auto px-4 py-4 flex flex-col gap-4">
         {(tagFilter || categoryFilter) ? (
@@ -312,11 +363,33 @@ function DocumentsContent() {
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
+            {docs.length > 1 && (
+              <li className="flex items-center gap-2 px-1 pb-1">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded accent-sky-600 cursor-pointer"
+                  checked={selected.size === docs.length}
+                  onChange={() => setSelected(selected.size === docs.length ? new Set() : new Set(docs.map((d) => d.id)))}
+                  aria-label="Select all"
+                />
+                <span className="text-xs text-zinc-500">
+                  {selected.size > 0 ? `${selected.size} of ${docs.length} selected` : "Select all"}
+                </span>
+              </li>
+            )}
             {docs.map((doc) => (
-              <li key={doc.id}>
+              <li key={doc.id} className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 flex items-center gap-3 px-4 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded accent-sky-600 cursor-pointer shrink-0"
+                  checked={selected.has(doc.id)}
+                  onChange={() => toggleSelect(doc.id)}
+                  aria-label={`Select ${summary(doc.extractedData)}`}
+                  onClick={(e) => e.stopPropagation()}
+                />
                 <Link
                   href={`/documents/${doc.id}`}
-                  className="block rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  className="flex-1 min-w-0 block py-4"
                 >
                   <p className="font-medium truncate">{summary(doc.extractedData)}</p>
                   <p className="text-sm text-zinc-500 mt-1">
@@ -383,6 +456,62 @@ function DocumentsContent() {
           </ul>
         )}
       </main>
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-14 left-0 right-0 z-10 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-700 shadow-lg px-4 py-3">
+          <div className="max-w-lg mx-auto flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">{selected.size} selected</span>
+              <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+                Deselect all
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <select
+                disabled={bulkWorking}
+                defaultValue=""
+                onChange={(e) => { if (e.target.value) { bulkAction("setStatus", { status: e.target.value }); e.target.value = ""; } }}
+                className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm disabled:opacity-50"
+              >
+                <option value="" disabled>Set status…</option>
+                <option value="pending">Pending</option>
+                <option value="paid">Paid</option>
+                <option value="submitted">Submitted</option>
+                <option value="reimbursed">Reimbursed</option>
+                <option value="not_eligible">Not eligible</option>
+              </select>
+              <div className="flex gap-1 flex-1 min-w-[160px]">
+                <input
+                  type="text"
+                  placeholder="Add tag…"
+                  value={bulkTagInput}
+                  onChange={(e) => setBulkTagInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && bulkTagInput.trim()) bulkAction("addTag", { tag: bulkTagInput.trim() }); }}
+                  disabled={bulkWorking}
+                  className="flex-1 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  onClick={() => { if (bulkTagInput.trim()) bulkAction("addTag", { tag: bulkTagInput.trim() }); }}
+                  disabled={bulkWorking || !bulkTagInput.trim()}
+                  className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                >
+                  Add
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => bulkAction("delete")}
+                disabled={bulkWorking}
+                className="rounded-lg bg-red-600 text-white px-3 py-1.5 text-sm font-medium disabled:opacity-50 hover:bg-red-700"
+              >
+                {bulkWorking ? "…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

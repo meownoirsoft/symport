@@ -22,7 +22,7 @@ Respond with a single JSON object. Include "type", "category", "title", and "tag
 
 - "type": one of rx_receipt, eob, utility_bill, general (legacy classification).
 - "category": one of receipt, financial, medical, government, legal, identity, general. Use "receipt" for any purchase/payment receipt (retail, pharmacy, etc.). Use "financial" for bills, statements, EOBs, invoices, utility bills. Use "medical" for medical records, provider statements, prescriptions. Use "government", "legal", or "identity" when the document clearly fits (e.g. tax notice, court doc, ID). Use "general" for everything else.
-- "title" (required, 2-5 words max): Short label only, e.g. "Prescription receipt", "Insurance EOB", "Utility bill". No sentences.
+- "title" (required, 3-6 words): Include the specific vendor, pharmacy, provider, or insurer name when visible, plus the document type. Examples: "CVS Pharmacy receipt", "Blue Shield EOB", "PG&E utility bill", "Dr. Kim visit record". Prefer specific names over generic labels like "Prescription receipt" or "Insurance EOB".
 - "tags": array of 3–8 short labels (e.g. medical, receipt, insurance, tax, HSA). No spaces in a tag; use underscores if needed.
 
 `;
@@ -178,6 +178,40 @@ export function buildSearchText(data: ExtractedDoc): string {
     parts.push(JSON.stringify(data.key_fields));
   }
   return parts.join(" ");
+}
+
+/**
+ * Extract structured data from a PDF buffer.
+ * For text-based PDFs: extracts text via pdf-parse then calls extractFromText().
+ * For image-only/scanned PDFs (no extractable text): returns a minimal record
+ * with an extraction note so the user knows to try re-extracting after adding notes.
+ */
+export async function extractFromPDF(
+  buffer: Buffer,
+  options?: { userFeedback?: string | null }
+): Promise<ExtractedDoc> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pdfModule = await import("pdf-parse") as any;
+  const pdfParse = (pdfModule.default ?? pdfModule) as (buf: Buffer) => Promise<{ text: string }>;
+  let text = "";
+  try {
+    const result = await pdfParse(buffer);
+    text = result.text?.trim() ?? "";
+  } catch {
+    // Malformed or encrypted PDF — fall through to scanned handling
+  }
+
+  if (text.length > 80) {
+    return extractFromText(text, options);
+  }
+
+  // Scanned/image-only PDF: no usable text layer
+  return {
+    type: "general",
+    title: "Scanned PDF",
+    summary: "This appears to be a scanned (image-only) PDF. No text could be extracted automatically. Add notes below describing the document content, then use Re-extract with feedback.",
+    tags: ["pdf", "scanned"],
+  } as ExtractedDoc;
 }
 
 /** Normalize tags to a string array (trimmed, spaces→underscores, unique). Preserves capitalization. */
