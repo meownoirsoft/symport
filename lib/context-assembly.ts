@@ -33,6 +33,11 @@ export interface BuildContextPackageOptions {
    * Latest user message content; used to steer semantic retrieval.
    */
   latestUserMessage: string;
+  /**
+   * Optional 4-digit year string (e.g. "2024"). When set, only documents
+   * whose extractedData.date starts with this year are included in context.
+   */
+  taxYear?: string | null;
 }
 
 export interface BuildContextPackageResult {
@@ -79,6 +84,7 @@ function makeCacheKey(opts: BuildContextPackageOptions): CacheKey {
     opts.conversationId,
     opts.contextLabels.slice().sort().join(","),
     opts.modelString ?? "unknown",
+    opts.taxYear ?? "all",
     normalizedMessage,
   ].join("|");
 }
@@ -130,6 +136,14 @@ function describeDocument(data: Record<string, unknown>, detailLevel: DetailLeve
   if (data.insurer) keyFields.push(`Insurer: ${data.insurer}`);
   if (data.provider) keyFields.push(`Provider: ${data.provider}`);
 
+  if (detailLevel !== "low") {
+    if (data.tax_category && data.tax_category !== "unknown") {
+      keyFields.push(`Tax category: ${data.tax_category}`);
+    }
+    if (data.hsa_fsa_eligible === true) keyFields.push("HSA/FSA eligible: yes");
+    else if (data.hsa_fsa_eligible === false) keyFields.push("HSA/FSA eligible: no");
+  }
+
   const base = [title, summary].filter(Boolean).join(" — ");
 
   if (detailLevel === "low") {
@@ -139,11 +153,88 @@ function describeDocument(data: Record<string, unknown>, detailLevel: DetailLeve
   const joinedFields = keyFields.join(", ");
   const parts = [base, joinedFields].filter(Boolean);
 
-  if (detailLevel === "medium") {
-    return parts.join(" — ");
+  return parts.join(" — ");
+}
+
+function buildContextSummary(
+  docs: { tags: string[]; extractedData: unknown }[],
+  label: string,
+  overrides: Record<string, string | null>,
+  taxYear?: string | null
+): string {
+  let matching = docs.filter((doc) => {
+    const tags = (doc.tags ?? []).map((t) => String(t).trim()).filter(Boolean);
+    if (label === "Other") return documentBelongsToOnlyOther(tags, overrides);
+    return tags.some((t) => getCategoryForTag(t, overrides) === label);
+  });
+  if (taxYear) {
+    matching = matching.filter((doc) => {
+      const d = (doc.extractedData as Record<string, unknown>)?.date;
+      return typeof d === "string" && d.startsWith(taxYear);
+    });
+  }
+  if (!matching.length) return "";
+
+  let totalAmount = 0;
+  let amountCount = 0;
+  let hsaEligible = 0;
+  const dates: string[] = [];
+  const providerFreq = new Map<string, number>();
+
+  for (const doc of matching) {
+    const data = (doc.extractedData as Record<string, unknown>) ?? {};
+
+    const rawAmt = data.amount ?? data.copay_amount ?? data.patient_responsibility ?? data.amount_paid;
+    const amt = rawAmt != null ? parseFloat(String(rawAmt)) : NaN;
+    if (!isNaN(amt) && amt > 0) { totalAmount += amt; amountCount++; }
+
+    if (data.hsa_fsa_eligible === true) hsaEligible++;
+
+    const dateVal = typeof data.date === "string" ? data.date : null;
+    if (dateVal) dates.push(dateVal);
+
+    for (const field of ["provider", "vendor", "pharmacy", "insurer", "party"] as const) {
+      const v = data[field];
+      if (typeof v === "string" && v.trim()) {
+        const key = v.trim();
+        providerFreq.set(key, (providerFreq.get(key) ?? 0) + 1);
+      }
+    }
   }
 
-  return parts.join(" — ");
+  const parts: string[] = [`${matching.length} document${matching.length !== 1 ? "s" : ""}`];
+
+  if (dates.length > 0) {
+    const sorted = dates.slice().sort();
+    const earliest = sorted[0];
+    const latest = sorted[sorted.length - 1];
+    if (earliest === latest) {
+      parts.push(`date: ${earliest}`);
+    } else {
+      const ey = earliest.slice(0, 4);
+      const ly = latest.slice(0, 4);
+      const range =
+        ey === ly
+          ? `${earliest.slice(5)} to ${latest.slice(5)} ${ly}`
+          : `${earliest} to ${latest}`;
+      parts.push(`dates: ${range}`);
+    }
+  }
+
+  if (amountCount > 0) {
+    parts.push(`$${totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} total spend`);
+  }
+  if (hsaEligible > 0) parts.push(`${hsaEligible} HSA/FSA eligible`);
+
+  if (providerFreq.size > 0) {
+    const top = [...providerFreq.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name]) => name);
+    parts.push(`key providers/vendors: ${top.join(", ")}`);
+  }
+
+  return `Overview: ${parts.join(" · ")}`;
 }
 
 function sameContextSet(activeIds: string[] | null | undefined, currentLabels: ContextLabel[]): boolean {
@@ -273,7 +364,7 @@ export async function buildContextPackage(contextLabels: ContextLabel[]): Promis
 export async function buildContextPackageForConversation(
   opts: BuildContextPackageOptions
 ): Promise<BuildContextPackageResult> {
-  const { conversationId, contextLabels, modelString, latestUserMessage } = opts;
+  const { conversationId, contextLabels, modelString, latestUserMessage, taxYear } = opts;
 
   if (!contextLabels.length) {
     const contextPackage =
@@ -332,8 +423,18 @@ export async function buildContextPackageForConversation(
       : null;
   const overrides = readCategoryOverrides();
 
+  const allDocsForSummary = await prisma.document.findMany({
+    select: { tags: true, extractedData: true },
+  });
+
   for (const label of contextLabels) {
-    const docs = semanticByContext.get(label) ?? fallbackDocs ?? [];
+    const rawDocs = semanticByContext.get(label) ?? fallbackDocs ?? [];
+    const docs = taxYear
+      ? rawDocs.filter((doc) => {
+          const d = (doc.extractedData as Record<string, unknown>)?.date;
+          return typeof d === "string" && d.startsWith(taxYear);
+        })
+      : rawDocs;
 
     if (!docs.length) continue;
 
@@ -369,8 +470,9 @@ export async function buildContextPackageForConversation(
 
     if (!lines.length) continue;
 
+    const summary = buildContextSummary(allDocsForSummary, label, overrides, taxYear);
     const header = `[CONTEXT: ${label}]`;
-    const sectionLines = [header, ...lines];
+    const sectionLines = summary ? [header, summary, ...lines] : [header, ...lines];
     const sectionTokens = estimateLinesTokens(sectionLines);
 
     if (sectionTokens > remainingBudget) {

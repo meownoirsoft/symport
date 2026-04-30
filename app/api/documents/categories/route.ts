@@ -16,6 +16,8 @@ export async function GET() {
   });
 
   const countByCategory = new Map<string, number>();
+  const countByTag = new Map<string, number>();
+
   for (const label of categories) {
     countByCategory.set(label, 0);
   }
@@ -26,6 +28,7 @@ export async function GET() {
     for (const tag of tags) {
       const cat = getCategoryForTag(tag, overrides);
       if (categories.includes(cat)) categoriesInDoc.add(cat);
+      countByTag.set(tag, (countByTag.get(tag) ?? 0) + 1);
     }
     for (const cat of categoriesInDoc) {
       if (cat !== "Other") {
@@ -42,5 +45,8 @@ export async function GET() {
     count: countByCategory.get(name) ?? 0,
   })).filter((c) => c.count > 0 || c.name === "Other");
 
-  return NextResponse.json({ categories: result });
+  return NextResponse.json({
+    categories: result,
+    tagCounts: Object.fromEntries(countByTag),
+  });
 }

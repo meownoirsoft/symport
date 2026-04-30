@@ -30,6 +30,10 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+*:Zone.Identifier
+
+# TypeScript
+*.tsbuildinfo
 
 # Uploaded images (sensitive)
 uploads/

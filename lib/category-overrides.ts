@@ -11,6 +11,8 @@ export type CategoryConfig = {
   categories?: string[] | null;
   /** Tag (normalized) -> category name or null for Other. */
   tagToCategory?: CategoryOverrides | null;
+  /** Free-text notes per category name. */
+  categoryNotes?: Record<string, string> | null;
 };
 
 function ensureDataDir() {
@@ -36,9 +38,13 @@ export function readCategoryConfig(): CategoryConfig {
         typeof data.tagToCategory === "object" && data.tagToCategory !== null
           ? data.tagToCategory
           : {},
+      categoryNotes:
+        typeof data.categoryNotes === "object" && data.categoryNotes !== null
+          ? data.categoryNotes
+          : {},
     };
   } catch {
-    return { tagToCategory: {} };
+    return { tagToCategory: {}, categoryNotes: {} };
   }
 }
 
@@ -73,12 +79,13 @@ export function writeCategoryOverrides(overrides: CategoryOverrides): void {
   writeCategoryConfig({ ...config, tagToCategory: overrides });
 }
 
-/** Update full config (categories and/or tagToCategory). */
+/** Update full config (categories and/or tagToCategory and/or categoryNotes). */
 export function writeFullCategoryConfig(updates: Partial<CategoryConfig>): void {
   const config = readCategoryConfig();
   const next: CategoryConfig = {
     categories: updates.categories !== undefined ? updates.categories : config.categories,
     tagToCategory: updates.tagToCategory !== undefined ? updates.tagToCategory : config.tagToCategory ?? {},
+    categoryNotes: updates.categoryNotes !== undefined ? updates.categoryNotes : config.categoryNotes ?? {},
   };
   writeCategoryConfig(next);
 }

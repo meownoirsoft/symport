@@ -10,7 +10,7 @@ import {
   type CategoryOverrides,
 } from "@/lib/category-overrides";
 
-/** GET: return categories (effective list), tags per category, and tagToCategory overrides. */
+/** GET: return categories (effective list), tags per category, tagToCategory overrides, and categoryNotes. */
 export async function GET() {
   const config = readCategoryConfig();
   const categories = getEffectiveCategories();
@@ -23,10 +23,11 @@ export async function GET() {
     categories,
     tagsByCategory,
     overrides: tagToCategory,
+    categoryNotes: config.categoryNotes ?? {},
   });
 }
 
-/** PATCH: update config. Body: { tag, category } | { categories } | { createCategory } | { removeCategory } | { renameCategory }. */
+/** PATCH: update config. Body: { tag, category } | { categories } | { createCategory } | { removeCategory } | { renameCategory } | { setCategoryNote }. */
 export async function PATCH(request: Request) {
   let body: {
     overrides?: CategoryOverrides;
@@ -36,6 +37,7 @@ export async function PATCH(request: Request) {
     createCategory?: string;
     removeCategory?: string;
     renameCategory?: { from: string; to: string };
+    setCategoryNote?: { category: string; note: string };
   };
   try {
     body = await request.json();
@@ -122,5 +124,17 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ ok: true, overrides: tagToCategory });
   }
 
-  return NextResponse.json({ error: "Provide overrides, tag+category, categories, createCategory, removeCategory, or renameCategory" }, { status: 400 });
+  if (body.setCategoryNote !== undefined) {
+    const { category, note } = body.setCategoryNote;
+    if (typeof category !== "string" || !category.trim()) {
+      return NextResponse.json({ error: "category required" }, { status: 400 });
+    }
+    const categoryNotes = { ...(config.categoryNotes ?? {}) };
+    if (note) categoryNotes[category] = note;
+    else delete categoryNotes[category];
+    writeFullCategoryConfig({ ...config, categoryNotes });
+    return NextResponse.json({ ok: true, categoryNotes });
+  }
+
+  return NextResponse.json({ error: "Provide overrides, tag+category, categories, createCategory, removeCategory, renameCategory, or setCategoryNote" }, { status: 400 });
 }

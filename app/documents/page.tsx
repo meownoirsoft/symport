@@ -38,21 +38,33 @@ function DocumentsContent() {
   const [q, setQ] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [taxCategoryFilter, setTaxCategoryFilter] = useState("");
+  const [hsaFsaFilter, setHsaFsaFilter] = useState("");
+  const [taxYearFilter, setTaxYearFilter] = useState("");
   const [categoriesWithCounts, setCategoriesWithCounts] = useState<CategoryWithCount[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkWorking, setBulkWorking] = useState(false);
+  const [bulkTagInput, setBulkTagInput] = useState("");
 
   // Sync tag and category from URL on load and when URL changes
   useEffect(() => {
     setTagFilter(searchParams.get("tag")?.trim() ?? "");
     setCategoryFilter(searchParams.get("category")?.trim() ?? "");
+    setTaxCategoryFilter(searchParams.get("tax_category")?.trim() ?? "");
+    setHsaFsaFilter(searchParams.get("hsa_fsa_eligible")?.trim() ?? "");
+    setTaxYearFilter(searchParams.get("tax_year")?.trim() ?? "");
   }, [searchParams]);
 
   const queryString = useCallback(() => {
     const params = new URLSearchParams();
-    if (q) params.set("q", q);
+    if (q) { params.set("q", q); params.set("semantic", "1"); }
     if (tagFilter.trim()) params.set("tag", tagFilter.trim());
     if (categoryFilter.trim()) params.set("category", categoryFilter.trim());
+    if (taxCategoryFilter.trim()) params.set("tax_category", taxCategoryFilter.trim());
+    if (hsaFsaFilter.trim()) params.set("hsa_fsa_eligible", hsaFsaFilter.trim());
+    if (taxYearFilter.trim()) params.set("tax_year", taxYearFilter.trim());
     return params.toString();
-  }, [q, tagFilter, categoryFilter]);
+  }, [q, tagFilter, categoryFilter, taxCategoryFilter, hsaFsaFilter, taxYearFilter]);
 
   const setTagAndUrl = useCallback(
     (tag: string) => {
@@ -78,18 +90,91 @@ function DocumentsContent() {
     [router, searchParams]
   );
 
+  const setTaxYearAndUrl = useCallback(
+    (year: string) => {
+      setTaxYearFilter(year);
+      const params = new URLSearchParams(searchParams.toString());
+      if (year) params.set("tax_year", year);
+      else params.delete("tax_year");
+      const next = params.toString();
+      router.replace(next ? `/documents?${next}` : "/documents", { scroll: false });
+    },
+    [router, searchParams]
+  );
+
+  const setHsaFsaAndUrl = useCallback(
+    (val: string) => {
+      setHsaFsaFilter(val);
+      const params = new URLSearchParams(searchParams.toString());
+      if (val) params.set("hsa_fsa_eligible", val);
+      else params.delete("hsa_fsa_eligible");
+      const next = params.toString();
+      router.replace(next ? `/documents?${next}` : "/documents", { scroll: false });
+    },
+    [router, searchParams]
+  );
+
+  const setTaxCategoryAndUrl = useCallback(
+    (tc: string) => {
+      setTaxCategoryFilter(tc);
+      const params = new URLSearchParams(searchParams.toString());
+      if (tc) params.set("tax_category", tc);
+      else params.delete("tax_category");
+      const next = params.toString();
+      router.replace(next ? `/documents?${next}` : "/documents", { scroll: false });
+    },
+    [router, searchParams]
+  );
+
   const clearTopicAndUrl = useCallback(() => {
     setTagFilter("");
     setCategoryFilter("");
+    setTaxCategoryFilter("");
+    setHsaFsaFilter("");
+    setTaxYearFilter("");
     router.replace("/documents", { scroll: false });
   }, [router]);
+
+  async function bulkAction(action: string, extra: Record<string, string> = {}) {
+    if (!selected.size || bulkWorking) return;
+    if (action === "delete" && !confirm(`Delete ${selected.size} document${selected.size !== 1 ? "s" : ""}? This cannot be undone.`)) return;
+    setBulkWorking(true);
+    try {
+      const res = await fetch("/api/documents/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selected], action, ...extra }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      if (action === "delete") {
+        setDocs((prev) => prev.filter((d) => !selected.has(d.id)));
+      } else if (action === "addTag") {
+        const tag = extra.tag;
+        setDocs((prev) => prev.map((d) => selected.has(d.id) && !d.tags?.includes(tag) ? { ...d, tags: [...(d.tags ?? []), tag] } : d));
+        setBulkTagInput("");
+      }
+      setSelected(new Set());
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Bulk action failed");
+    } finally {
+      setBulkWorking(false);
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
 
   // Fetch documents when filters change
   useEffect(() => {
     setLoading(true);
     fetch(`/api/documents?${queryString()}`)
       .then((r) => r.json())
-      .then(setDocs)
+      .then((data) => { setDocs(data); setSelected(new Set()); })
       .finally(() => setLoading(false));
   }, [queryString]);
 
@@ -110,12 +195,26 @@ function DocumentsContent() {
           </Link>
           <h1 className="text-xl font-semibold">Documents</h1>
         </div>
-        <Link
-          href="/settings/categories"
-          className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-        >
-          Manage categories
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/insights"
+            className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+          >
+            Insights
+          </Link>
+          <Link
+            href="/import/obsidian"
+            className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+          >
+            Import
+          </Link>
+          <Link
+            href="/settings/categories"
+            className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+          >
+            Manage categories
+          </Link>
+        </div>
       </header>
       <main className="max-w-lg mx-auto px-4 py-4 flex flex-col gap-4">
         {(tagFilter || categoryFilter) ? (
@@ -184,6 +283,44 @@ function DocumentsContent() {
           className="w-full rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-sm"
           aria-label="Filter by tag"
         />
+        <div className="flex gap-2">
+          <select
+            value={taxCategoryFilter}
+            onChange={(e) => setTaxCategoryAndUrl(e.target.value)}
+            className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-sm"
+            aria-label="Filter by tax category"
+          >
+            <option value="">All tax categories</option>
+            <option value="medical">Medical</option>
+            <option value="charity">Charity</option>
+            <option value="tax_payment">Tax payment</option>
+            <option value="mortgage_interest">Mortgage interest</option>
+            <option value="business_expense">Business expense</option>
+            <option value="personal">Personal</option>
+            <option value="unknown">Unknown</option>
+          </select>
+          <select
+            value={hsaFsaFilter}
+            onChange={(e) => setHsaFsaAndUrl(e.target.value)}
+            className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-sm"
+            aria-label="Filter by HSA/FSA eligibility"
+          >
+            <option value="">HSA/FSA: any</option>
+            <option value="true">HSA/FSA eligible</option>
+            <option value="false">Not eligible</option>
+          </select>
+          <select
+            value={taxYearFilter}
+            onChange={(e) => setTaxYearAndUrl(e.target.value)}
+            className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-sm"
+            aria-label="Filter by tax year"
+          >
+            <option value="">All years</option>
+            {Array.from({ length: new Date().getFullYear() - 2019 }, (_, i) => String(new Date().getFullYear() - i)).map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap gap-2">
             {docs.length > 0 && (
@@ -226,11 +363,33 @@ function DocumentsContent() {
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
+            {docs.length > 1 && (
+              <li className="flex items-center gap-2 px-1 pb-1">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded accent-sky-600 cursor-pointer"
+                  checked={selected.size === docs.length}
+                  onChange={() => setSelected(selected.size === docs.length ? new Set() : new Set(docs.map((d) => d.id)))}
+                  aria-label="Select all"
+                />
+                <span className="text-xs text-zinc-500">
+                  {selected.size > 0 ? `${selected.size} of ${docs.length} selected` : "Select all"}
+                </span>
+              </li>
+            )}
             {docs.map((doc) => (
-              <li key={doc.id}>
+              <li key={doc.id} className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 flex items-center gap-3 px-4 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded accent-sky-600 cursor-pointer shrink-0"
+                  checked={selected.has(doc.id)}
+                  onChange={() => toggleSelect(doc.id)}
+                  aria-label={`Select ${summary(doc.extractedData)}`}
+                  onClick={(e) => e.stopPropagation()}
+                />
                 <Link
                   href={`/documents/${doc.id}`}
-                  className="block rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  className="flex-1 min-w-0 block py-4"
                 >
                   <p className="font-medium truncate">{summary(doc.extractedData)}</p>
                   <p className="text-sm text-zinc-500 mt-1">
@@ -250,12 +409,109 @@ function DocumentsContent() {
                       ))}
                     </div>
                   )}
+                  {(() => {
+                    const tc = doc.extractedData.tax_category as string | null | undefined;
+                    const hsa = doc.extractedData.hsa_fsa_eligible;
+                    if (!tc && hsa == null) return null;
+                    const TAX_COLORS: Record<string, string> = {
+                      medical: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+                      charity: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
+                      tax_payment: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+                      mortgage_interest: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300",
+                      business_expense: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+                      personal: "bg-zinc-100 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400",
+                      unknown: "bg-zinc-100 text-zinc-400 dark:bg-zinc-700 dark:text-zinc-500",
+                    };
+                    const TAX_LABELS: Record<string, string> = {
+                      medical: "Tax: Medical", charity: "Tax: Charity", tax_payment: "Tax: Tax payment",
+                      mortgage_interest: "Tax: Mortgage interest", business_expense: "Tax: Business expense",
+                      personal: "Tax: Personal", unknown: "Tax: Unknown",
+                    };
+                    return (
+                      <div className="flex flex-wrap gap-1.5 mt-1.5" onClick={(e) => e.preventDefault()}>
+                        {tc && tc !== "unknown" && (
+                          <Link
+                            href={`/documents?tax_category=${encodeURIComponent(tc)}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium hover:opacity-80 ${TAX_COLORS[tc] ?? TAX_COLORS.unknown}`}
+                          >
+                            {TAX_LABELS[tc] ?? tc}
+                          </Link>
+                        )}
+                        {hsa === true && (
+                          <Link
+                            href="/documents?hsa_fsa_eligible=true"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium hover:opacity-80 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                          >
+                            HSA/FSA ✓
+                          </Link>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </Link>
               </li>
             ))}
           </ul>
         )}
       </main>
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-14 left-0 right-0 z-10 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-700 shadow-lg px-4 py-3">
+          <div className="max-w-lg mx-auto flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">{selected.size} selected</span>
+              <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+                Deselect all
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <select
+                disabled={bulkWorking}
+                defaultValue=""
+                onChange={(e) => { if (e.target.value) { bulkAction("setStatus", { status: e.target.value }); e.target.value = ""; } }}
+                className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm disabled:opacity-50"
+              >
+                <option value="" disabled>Set status…</option>
+                <option value="pending">Pending</option>
+                <option value="paid">Paid</option>
+                <option value="submitted">Submitted</option>
+                <option value="reimbursed">Reimbursed</option>
+                <option value="not_eligible">Not eligible</option>
+              </select>
+              <div className="flex gap-1 flex-1 min-w-[160px]">
+                <input
+                  type="text"
+                  placeholder="Add tag…"
+                  value={bulkTagInput}
+                  onChange={(e) => setBulkTagInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && bulkTagInput.trim()) bulkAction("addTag", { tag: bulkTagInput.trim() }); }}
+                  disabled={bulkWorking}
+                  className="flex-1 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  onClick={() => { if (bulkTagInput.trim()) bulkAction("addTag", { tag: bulkTagInput.trim() }); }}
+                  disabled={bulkWorking || !bulkTagInput.trim()}
+                  className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                >
+                  Add
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => bulkAction("delete")}
+                disabled={bulkWorking}
+                className="rounded-lg bg-red-600 text-white px-3 py-1.5 text-sm font-medium disabled:opacity-50 hover:bg-red-700"
+              >
+                {bulkWorking ? "…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,11 +2,33 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 function ChatIcon() {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+function TaxIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="9" y1="13" x2="15" y2="13" />
+      <line x1="9" y1="17" x2="15" y2="17" />
+    </svg>
+  );
+}
+
+function HsaIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <path d="M2 10h20" />
+      <path d="M12 15v-2M10 14h4" />
     </svg>
   );
 }
@@ -20,14 +42,24 @@ function SettingsIcon() {
   );
 }
 
-const tabs = [
-  { href: "/chat", label: "Chat", icon: ChatIcon },
-  { href: "/settings", label: "Settings", icon: SettingsIcon },
-] as const;
 
 export default function BottomNav() {
   const pathname = usePathname();
-  // Hide bottom nav on public/auth pages
+  const [hsaPending, setHsaPending] = useState(0);
+  const [taxUnclaimed, setTaxUnclaimed] = useState(0);
+
+  useEffect(() => {
+    fetch("/api/documents/action-counts")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data) {
+          setHsaPending(data.hsaPending ?? 0);
+          setTaxUnclaimed(data.taxUnclaimed ?? 0);
+        }
+      })
+      .catch(() => {});
+  }, [pathname]);
+
   if (pathname.startsWith("/login") || pathname.startsWith("/register")) {
     return null;
   }
@@ -35,10 +67,17 @@ export default function BottomNav() {
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(href + "/");
 
+  const tabs = [
+    { href: "/chat", label: "Chat", icon: ChatIcon, count: 0 },
+    { href: "/hsa", label: "HSA/FSA", icon: HsaIcon, count: hsaPending },
+    { href: "/tax", label: "Tax", icon: TaxIcon, count: taxUnclaimed },
+    { href: "/settings", label: "Settings", icon: SettingsIcon, count: 0 },
+  ] as const;
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur safe-area-pb">
       <div className="max-w-2xl mx-auto flex items-center justify-around h-14">
-        {tabs.map(({ href, label, icon: Icon }) => (
+        {tabs.map(({ href, label, icon: Icon, count }) => (
           <Link
             key={href}
             href={href}
@@ -49,7 +88,12 @@ export default function BottomNav() {
             }`}
           >
             <Icon />
-            {label}
+            <span className="flex items-baseline gap-0.5">
+              {label}
+              {count > 0 && (
+                <span className="text-[11px] font-normal">({count})</span>
+              )}
+            </span>
           </Link>
         ))}
       </div>

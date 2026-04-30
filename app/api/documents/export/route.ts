@@ -3,6 +3,16 @@ import { prisma } from "@/lib/db";
 import { toSchemaOrgJsonLd } from "@/lib/document-schemas";
 import type { DocumentKind } from "@/lib/document-schemas";
 
+const TAX_CATEGORY_VALUES = new Set([
+  "medical",
+  "charity",
+  "tax_payment",
+  "mortgage_interest",
+  "business_expense",
+  "personal",
+  "unknown",
+]);
+
 type DocRow = {
   id: string;
   tags: string[];
@@ -19,10 +29,17 @@ function flattenForCsv(doc: DocRow): Record<string, string> {
     get("date_issued") ||
     get("service_date") ||
     (doc.createdAt ? new Date(doc.createdAt).toISOString().slice(0, 10) : "");
+  // amount = out-of-pocket / purchase amount (what to claim for HSA/FSA or deduct).
   const amount =
+    get("amount") ||
+    get("amount_paid") ||
+    get("copay_amount") ||
+    get("patient_responsibility") ||
+    "";
+  // amount_due = what is owed on a bill/EOB.
+  const amountDue =
     get("amount_due") ||
     get("patient_responsibility") ||
-    get("copay_amount") ||
     get("billed_amount") ||
     "";
   return {
@@ -31,11 +48,15 @@ function flattenForCsv(doc: DocRow): Record<string, string> {
     tags: Array.isArray(doc.tags) ? doc.tags.join("; ") : "",
     created_at: doc.createdAt ? new Date(doc.createdAt).toISOString() : "",
     date,
+    vendor: get("vendor"),
     provider: get("provider") || get("issuer"),
     pharmacy: get("pharmacy"),
     insurer: get("insurer"),
-    amount_due: amount,
+    amount,
+    amount_due: amountDue,
     due_date: get("due_date"),
+    tax_category: get("tax_category"),
+    hsa_fsa_eligible: get("hsa_fsa_eligible"),
     summary: (get("summary") || "").slice(0, 200),
   };
 }
@@ -58,6 +79,13 @@ export async function GET(request: Request) {
   const q = searchParams.get("q")?.trim();
   const tag = searchParams.get("tag")?.trim();
   const category = searchParams.get("category")?.trim();
+  const taxCategoryParam = searchParams.get("tax_category")?.trim();
+  const hsaFsaParam = searchParams.get("hsa_fsa_eligible")?.trim();
+
+  const taxCategory = taxCategoryParam && TAX_CATEGORY_VALUES.has(taxCategoryParam) ? taxCategoryParam : null;
+  const hsaFsaFilter =
+    hsaFsaParam === "true" ? true : hsaFsaParam === "false" ? false : null;
+  const taxYear = searchParams.get("tax_year")?.trim() || null;
 
   if (format !== "csv" && format !== "json" && format !== "schema.org") {
     return NextResponse.json({ error: "format must be csv, json, or schema.org" }, { status: 400 });
@@ -89,6 +117,28 @@ export async function GET(request: Request) {
       const tags = (doc.tags ?? []).map((t) => String(t).trim()).filter(Boolean);
       if (category === "Other") return documentBelongsToOnlyOther(tags, overrides);
       return tags.some((t) => getCategoryForTag(t, overrides) === category);
+    });
+  }
+
+  if (taxCategory) {
+    docs = docs.filter((doc) => {
+      const data = doc.extractedData as Record<string, unknown>;
+      return data.tax_category === taxCategory;
+    });
+  }
+
+  if (hsaFsaFilter !== null) {
+    docs = docs.filter((doc) => {
+      const data = doc.extractedData as Record<string, unknown>;
+      return data.hsa_fsa_eligible === hsaFsaFilter;
+    });
+  }
+
+  if (taxYear) {
+    docs = docs.filter((doc) => {
+      const data = doc.extractedData as Record<string, unknown>;
+      const d = data.date;
+      return typeof d === "string" && d.startsWith(taxYear);
     });
   }
 
