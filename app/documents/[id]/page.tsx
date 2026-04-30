@@ -102,6 +102,9 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
   const [savingCrop, setSavingCrop] = useState(false);
   const [savingSharpen, setSavingSharpen] = useState(false);
   const [imageKey, setImageKey] = useState(0);
+  const [taxCategory, setTaxCategory] = useState<string>("");
+  const [hsaFsaEligible, setHsaFsaEligible] = useState<string>("");
+  const [savingTaxFields, setSavingTaxFields] = useState(false);
   const cropModalCropperRef = useRef<ReactCropperElement>(null);
   const panStart = useRef({ x: 0, y: 0 });
   const isDragging = useRef(false);
@@ -124,6 +127,9 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
         );
         setTags(Array.isArray(d.tags) ? [...d.tags] : []);
         setExtractionNotes(d.extractionNotes ?? "");
+        setTaxCategory(typeof d.extractedData.tax_category === "string" ? d.extractedData.tax_category : "");
+        const hsa = d.extractedData.hsa_fsa_eligible;
+        setHsaFsaEligible(hsa === true ? "true" : hsa === false ? "false" : "");
       });
   }, [id]);
 
@@ -149,6 +155,34 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       }
     } finally {
       setSavingTitle(false);
+    }
+  }
+
+  async function saveTaxFields(nextTaxCategory: string, nextHsaFsa: string) {
+    if (!id || savingTaxFields) return;
+    setSavingTaxFields(true);
+    try {
+      const body: Record<string, unknown> = {
+        tax_category: nextTaxCategory || null,
+        hsa_fsa_eligible: nextHsaFsa === "true" ? true : nextHsaFsa === "false" ? false : null,
+      };
+      const res = await fetch(`/api/documents/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok && doc) {
+        setDoc({
+          ...doc,
+          extractedData: {
+            ...doc.extractedData,
+            tax_category: body.tax_category,
+            hsa_fsa_eligible: body.hsa_fsa_eligible,
+          },
+        });
+      }
+    } finally {
+      setSavingTaxFields(false);
     }
   }
 
@@ -672,6 +706,45 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             >
               {retagging ? "Retagging…" : "Retag"}
             </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-zinc-500 mb-2">Tax fields</label>
+          <div className="flex gap-2">
+            <select
+              value={taxCategory}
+              onChange={(e) => {
+                setTaxCategory(e.target.value);
+                saveTaxFields(e.target.value, hsaFsaEligible);
+              }}
+              disabled={savingTaxFields}
+              className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm disabled:opacity-50"
+              aria-label="Tax category"
+            >
+              <option value="">Tax category…</option>
+              <option value="medical">Tax: Medical</option>
+              <option value="charity">Tax: Charity</option>
+              <option value="tax_payment">Tax: Tax payment</option>
+              <option value="mortgage_interest">Tax: Mortgage interest</option>
+              <option value="business_expense">Tax: Business expense</option>
+              <option value="personal">Tax: Personal</option>
+              <option value="unknown">Tax: Unknown</option>
+            </select>
+            <select
+              value={hsaFsaEligible}
+              onChange={(e) => {
+                setHsaFsaEligible(e.target.value);
+                saveTaxFields(taxCategory, e.target.value);
+              }}
+              disabled={savingTaxFields}
+              className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm disabled:opacity-50"
+              aria-label="HSA/FSA eligible"
+            >
+              <option value="">HSA/FSA eligibility…</option>
+              <option value="true">HSA/FSA eligible</option>
+              <option value="false">Not eligible</option>
+            </select>
           </div>
         </div>
 

@@ -38,12 +38,18 @@ function DocumentsContent() {
   const [q, setQ] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [taxCategoryFilter, setTaxCategoryFilter] = useState("");
+  const [hsaFsaFilter, setHsaFsaFilter] = useState("");
+  const [taxYearFilter, setTaxYearFilter] = useState("");
   const [categoriesWithCounts, setCategoriesWithCounts] = useState<CategoryWithCount[]>([]);
 
   // Sync tag and category from URL on load and when URL changes
   useEffect(() => {
     setTagFilter(searchParams.get("tag")?.trim() ?? "");
     setCategoryFilter(searchParams.get("category")?.trim() ?? "");
+    setTaxCategoryFilter(searchParams.get("tax_category")?.trim() ?? "");
+    setHsaFsaFilter(searchParams.get("hsa_fsa_eligible")?.trim() ?? "");
+    setTaxYearFilter(searchParams.get("tax_year")?.trim() ?? "");
   }, [searchParams]);
 
   const queryString = useCallback(() => {
@@ -51,8 +57,11 @@ function DocumentsContent() {
     if (q) params.set("q", q);
     if (tagFilter.trim()) params.set("tag", tagFilter.trim());
     if (categoryFilter.trim()) params.set("category", categoryFilter.trim());
+    if (taxCategoryFilter.trim()) params.set("tax_category", taxCategoryFilter.trim());
+    if (hsaFsaFilter.trim()) params.set("hsa_fsa_eligible", hsaFsaFilter.trim());
+    if (taxYearFilter.trim()) params.set("tax_year", taxYearFilter.trim());
     return params.toString();
-  }, [q, tagFilter, categoryFilter]);
+  }, [q, tagFilter, categoryFilter, taxCategoryFilter, hsaFsaFilter, taxYearFilter]);
 
   const setTagAndUrl = useCallback(
     (tag: string) => {
@@ -78,9 +87,48 @@ function DocumentsContent() {
     [router, searchParams]
   );
 
+  const setTaxYearAndUrl = useCallback(
+    (year: string) => {
+      setTaxYearFilter(year);
+      const params = new URLSearchParams(searchParams.toString());
+      if (year) params.set("tax_year", year);
+      else params.delete("tax_year");
+      const next = params.toString();
+      router.replace(next ? `/documents?${next}` : "/documents", { scroll: false });
+    },
+    [router, searchParams]
+  );
+
+  const setHsaFsaAndUrl = useCallback(
+    (val: string) => {
+      setHsaFsaFilter(val);
+      const params = new URLSearchParams(searchParams.toString());
+      if (val) params.set("hsa_fsa_eligible", val);
+      else params.delete("hsa_fsa_eligible");
+      const next = params.toString();
+      router.replace(next ? `/documents?${next}` : "/documents", { scroll: false });
+    },
+    [router, searchParams]
+  );
+
+  const setTaxCategoryAndUrl = useCallback(
+    (tc: string) => {
+      setTaxCategoryFilter(tc);
+      const params = new URLSearchParams(searchParams.toString());
+      if (tc) params.set("tax_category", tc);
+      else params.delete("tax_category");
+      const next = params.toString();
+      router.replace(next ? `/documents?${next}` : "/documents", { scroll: false });
+    },
+    [router, searchParams]
+  );
+
   const clearTopicAndUrl = useCallback(() => {
     setTagFilter("");
     setCategoryFilter("");
+    setTaxCategoryFilter("");
+    setHsaFsaFilter("");
+    setTaxYearFilter("");
     router.replace("/documents", { scroll: false });
   }, [router]);
 
@@ -184,6 +232,44 @@ function DocumentsContent() {
           className="w-full rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-sm"
           aria-label="Filter by tag"
         />
+        <div className="flex gap-2">
+          <select
+            value={taxCategoryFilter}
+            onChange={(e) => setTaxCategoryAndUrl(e.target.value)}
+            className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-sm"
+            aria-label="Filter by tax category"
+          >
+            <option value="">All tax categories</option>
+            <option value="medical">Medical</option>
+            <option value="charity">Charity</option>
+            <option value="tax_payment">Tax payment</option>
+            <option value="mortgage_interest">Mortgage interest</option>
+            <option value="business_expense">Business expense</option>
+            <option value="personal">Personal</option>
+            <option value="unknown">Unknown</option>
+          </select>
+          <select
+            value={hsaFsaFilter}
+            onChange={(e) => setHsaFsaAndUrl(e.target.value)}
+            className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-sm"
+            aria-label="Filter by HSA/FSA eligibility"
+          >
+            <option value="">HSA/FSA: any</option>
+            <option value="true">HSA/FSA eligible</option>
+            <option value="false">Not eligible</option>
+          </select>
+          <select
+            value={taxYearFilter}
+            onChange={(e) => setTaxYearAndUrl(e.target.value)}
+            className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-2 text-sm"
+            aria-label="Filter by tax year"
+          >
+            <option value="">All years</option>
+            {Array.from({ length: new Date().getFullYear() - 2019 }, (_, i) => String(new Date().getFullYear() - i)).map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap gap-2">
             {docs.length > 0 && (
@@ -250,6 +336,47 @@ function DocumentsContent() {
                       ))}
                     </div>
                   )}
+                  {(() => {
+                    const tc = doc.extractedData.tax_category as string | null | undefined;
+                    const hsa = doc.extractedData.hsa_fsa_eligible;
+                    if (!tc && hsa == null) return null;
+                    const TAX_COLORS: Record<string, string> = {
+                      medical: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+                      charity: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
+                      tax_payment: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+                      mortgage_interest: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300",
+                      business_expense: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+                      personal: "bg-zinc-100 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400",
+                      unknown: "bg-zinc-100 text-zinc-400 dark:bg-zinc-700 dark:text-zinc-500",
+                    };
+                    const TAX_LABELS: Record<string, string> = {
+                      medical: "Tax: Medical", charity: "Tax: Charity", tax_payment: "Tax: Tax payment",
+                      mortgage_interest: "Tax: Mortgage interest", business_expense: "Tax: Business expense",
+                      personal: "Tax: Personal", unknown: "Tax: Unknown",
+                    };
+                    return (
+                      <div className="flex flex-wrap gap-1.5 mt-1.5" onClick={(e) => e.preventDefault()}>
+                        {tc && tc !== "unknown" && (
+                          <Link
+                            href={`/documents?tax_category=${encodeURIComponent(tc)}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium hover:opacity-80 ${TAX_COLORS[tc] ?? TAX_COLORS.unknown}`}
+                          >
+                            {TAX_LABELS[tc] ?? tc}
+                          </Link>
+                        )}
+                        {hsa === true && (
+                          <Link
+                            href="/documents?hsa_fsa_eligible=true"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium hover:opacity-80 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                          >
+                            HSA/FSA ✓
+                          </Link>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </Link>
               </li>
             ))}

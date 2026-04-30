@@ -11,6 +11,10 @@ export async function GET(request: Request) {
   const q = searchParams.get("q")?.trim();
   const tag = searchParams.get("tag")?.trim();
   const category = searchParams.get("category")?.trim() as DocumentCategoryLabel | undefined;
+  const taxCategory = searchParams.get("tax_category")?.trim() || undefined;
+  const hsaFsaParam = searchParams.get("hsa_fsa_eligible")?.trim();
+  const hsaFsaFilter = hsaFsaParam === "true" ? true : hsaFsaParam === "false" ? false : null;
+  const taxYear = searchParams.get("tax_year")?.trim() || undefined;
   const useSemantic = searchParams.get("semantic") === "1" || searchParams.get("semantic") === "true";
 
   // Semantic search: vector similarity (Wiskr / pgvector)
@@ -33,6 +37,18 @@ export async function GET(request: Request) {
           const tags = (doc.tags ?? []).map((t) => String(t).trim()).filter(Boolean);
           if (category === "Other") return documentBelongsToOnlyOther(tags, overrides);
           return tags.some((t) => getCategoryForTag(t, overrides) === category);
+        });
+      }
+      if (taxCategory) {
+        docs = docs.filter((doc) => (doc.extractedData as Record<string, unknown>).tax_category === taxCategory);
+      }
+      if (hsaFsaFilter !== null) {
+        docs = docs.filter((doc) => (doc.extractedData as Record<string, unknown>).hsa_fsa_eligible === hsaFsaFilter);
+      }
+      if (taxYear) {
+        docs = docs.filter((doc) => {
+          const d = (doc.extractedData as Record<string, unknown>).date;
+          return typeof d === "string" && d.startsWith(taxYear);
         });
       }
       return NextResponse.json(docs);
@@ -64,6 +80,21 @@ export async function GET(request: Request) {
       const tags = (doc.tags ?? []).map((t) => String(t).trim()).filter(Boolean);
       if (category === "Other") return documentBelongsToOnlyOther(tags, overrides);
       return tags.some((t) => getCategoryForTag(t, overrides) === category);
+    });
+  }
+
+  if (taxCategory) {
+    docs = docs.filter((doc) => (doc.extractedData as Record<string, unknown>).tax_category === taxCategory);
+  }
+
+  if (hsaFsaFilter !== null) {
+    docs = docs.filter((doc) => (doc.extractedData as Record<string, unknown>).hsa_fsa_eligible === hsaFsaFilter);
+  }
+
+  if (taxYear) {
+    docs = docs.filter((doc) => {
+      const d = (doc.extractedData as Record<string, unknown>).date;
+      return typeof d === "string" && d.startsWith(taxYear);
     });
   }
 

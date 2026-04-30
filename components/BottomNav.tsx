@@ -11,6 +11,27 @@ function ChatIcon() {
   );
 }
 
+function TaxIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="9" y1="13" x2="15" y2="13" />
+      <line x1="9" y1="17" x2="15" y2="17" />
+    </svg>
+  );
+}
+
+function HsaIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <path d="M2 10h20" />
+      <path d="M12 15v-2M10 14h4" />
+    </svg>
+  );
+}
+
 function SettingsIcon() {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -22,6 +43,8 @@ function SettingsIcon() {
 
 const tabs = [
   { href: "/chat", label: "Chat", icon: ChatIcon },
+  { href: "/hsa", label: "HSA/FSA", icon: HsaIcon },
+  { href: "/tax", label: "Tax", icon: TaxIcon },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
 ] as const;
 
