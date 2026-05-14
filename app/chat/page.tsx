@@ -1026,12 +1026,12 @@ export default function ChatPage() {
                       )}
                     </button>
                   )}
-                  <div className="flex flex-col gap-0.5">
+                  <div className="flex flex-col gap-0.5 flex-1 sm:flex-none min-w-0">
                     <select
                       ref={personaSelectRef}
                       value={personaId}
                       onChange={(e) => setPersonaId(e.target.value)}
-                      className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50 outline-none text-base w-48 px-2 py-1"
+                      className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50 outline-none text-base w-full sm:w-48 px-2 py-1"
                       aria-label="Persona"
                     >
                       {personas.map((p) => (
@@ -1047,7 +1047,7 @@ export default function ChatPage() {
                       </span>
                     )}
                     {currentPersona?.description && (
-                      <span className="text-xs text-zinc-400 dark:text-zinc-500 px-1 leading-snug max-w-[24rem] block">
+                      <span className="hidden sm:block text-xs text-zinc-400 dark:text-zinc-500 px-1 leading-snug max-w-[24rem]">
                         {currentPersona.description}
                       </span>
                     )}
@@ -1056,7 +1056,7 @@ export default function ChatPage() {
                     type="button"
                     onClick={sendMessage}
                     disabled={sending || !input.trim()}
-                    className="ml-auto shrink-0 rounded-lg bg-sky-600 text-white px-4 py-2 text-base font-medium disabled:opacity-50"
+                    className="basis-full sm:basis-auto sm:ml-auto shrink-0 rounded-lg bg-sky-600 text-white px-4 py-2 text-base font-medium disabled:opacity-50"
                     aria-label="Send"
                   >
                     Send

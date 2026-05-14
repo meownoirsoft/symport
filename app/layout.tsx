@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
 import OnboardingModal from "@/components/OnboardingModal";
+import SplashScreen from "@/components/SplashScreen";
 
 export const metadata: Metadata = {
   title: "Symport",
@@ -16,6 +17,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased font-sans pb-14">
+        <SplashScreen />
         {children}
         <BottomNav />
         <OnboardingModal />
