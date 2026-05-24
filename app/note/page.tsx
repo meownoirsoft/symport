@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 export default function AddNotePage() {
   const router = useRouter();
@@ -14,7 +15,7 @@ export default function AddNotePage() {
 
   const renderedHtml = useMemo(() => {
     if (!preview || !text.trim()) return "";
-    return marked(text) as string;
+    return DOMPurify.sanitize(marked(text) as string);
   }, [preview, text]);
 
   async function handleSubmit(e: React.FormEvent) {

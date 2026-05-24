@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Cropper, { type ReactCropperElement } from "react-cropper";
 import "react-cropper/node_modules/cropperjs/dist/cropper.css";
 import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 function PrettyJson({ data, depth = 0 }: { data: unknown; depth?: number }) {
   if (data === null) {
@@ -331,7 +332,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
 
   const renderedNote = useMemo(() => {
     if (!notePreview || !noteText.trim()) return "";
-    return marked(noteText) as string;
+    return DOMPurify.sanitize(marked(noteText) as string);
   }, [notePreview, noteText]);
 
   async function saveExtractionNotes() {

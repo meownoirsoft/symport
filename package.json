@@ -3,12 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:prod": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:seed": "npx tsx prisma/seed.ts",
     "docker:up": "docker compose up -d",
@@ -20,9 +22,11 @@
   "dependencies": {
     "@prisma/client": "^6.19.2",
     "@tailwindcss/typography": "^0.5.19",
+    "@types/dompurify": "^3.0.5",
     "@types/pdf-parse": "^1.1.5",
     "bcryptjs": "^3.0.3",
     "cropperjs": "^2.1.0",
+    "dompurify": "^3.4.5",
     "dotenv": "^17.3.1",
     "marked": "^18.0.2",
     "next": "16.1.6",
@@ -37,6 +41,7 @@
     "sharp": "^0.34.5"
   },
   "devDependencies": {
+    "@netlify/plugin-nextjs": "^5.15.11",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

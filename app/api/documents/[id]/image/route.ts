@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { Readable } from "stream";
-import { writeFile } from "fs/promises";
 import { prisma } from "@/lib/db";
-import { readUploadStream, getUploadPath, ensureUploadDir } from "@/lib/uploads";
+import { uploadFile, getFileUrl } from "@/lib/bunny";
 import { sharpenAndEncode } from "@/lib/sharpen";
 
 export async function GET(
@@ -14,16 +12,8 @@ export async function GET(
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!doc.imagePath) return NextResponse.json({ error: "No image (note document)" }, { status: 404 });
 
-  const stream = readUploadStream(doc.imagePath);
-  if (!stream) return NextResponse.json({ error: "File not found" }, { status: 404 });
-
-  const webStream = Readable.toWeb(stream) as ReadableStream;
-  return new Response(webStream, {
-    headers: {
-      "Content-Type": "image/jpeg",
-      "Cache-Control": "private, no-cache",
-    },
-  });
+  // Redirect to CDN — auth is enforced by middleware before we get here
+  return NextResponse.redirect(getFileUrl(doc.imagePath), { status: 307 });
 }
 
 export async function PUT(
@@ -46,9 +36,7 @@ export async function PUT(
 
   const rawBuffer = Buffer.from(await file.arrayBuffer());
   const buffer = await sharpenAndEncode(rawBuffer);
-  const fullPath = getUploadPath(doc.imagePath);
-  ensureUploadDir();
-  await writeFile(fullPath, buffer);
+  await uploadFile(buffer, doc.imagePath, "image/jpeg");
 
   return NextResponse.json({ ok: true });
 }

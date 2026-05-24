@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { buildSearchText, type ExtractedDoc } from "@/lib/extract";
 import { updateDocumentEmbedding } from "@/lib/embeddings";
@@ -9,6 +11,10 @@ import { updateDocumentEmbedding } from "@/lib/embeddings";
  * Call once after updating buildSearchText, or anytime to fix stale search.
  */
 export async function POST() {
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const docs = await prisma.document.findMany({
     select: { id: true, extractedData: true },
   });

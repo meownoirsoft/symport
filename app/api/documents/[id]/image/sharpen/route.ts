@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { readFile, writeFile } from "fs/promises";
 import { prisma } from "@/lib/db";
-import { getUploadPath } from "@/lib/uploads";
+import { downloadFile, uploadFile } from "@/lib/bunny";
 import { sharpenIncrement } from "@/lib/sharpen";
 
 export async function POST(
@@ -13,16 +12,15 @@ export async function POST(
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!doc.imagePath) return NextResponse.json({ error: "No image (note document)" }, { status: 400 });
 
-  const fullPath = getUploadPath(doc.imagePath);
   let buffer: Buffer;
   try {
-    buffer = await readFile(fullPath);
+    buffer = await downloadFile(doc.imagePath);
   } catch {
     return NextResponse.json({ error: "Image file not found" }, { status: 404 });
   }
 
   const sharpened = await sharpenIncrement(buffer);
-  await writeFile(fullPath, sharpened);
+  await uploadFile(sharpened, doc.imagePath, "image/jpeg");
 
   return NextResponse.json({ ok: true });
 }

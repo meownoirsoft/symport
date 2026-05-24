@@ -122,3 +122,11 @@ model NextQuestion {
   used           Boolean  @default(false)
   createdAt      DateTime @default(now())
 }
+
+/// Generic key-value store for app-wide settings.
+/// Replaces the filesystem-based data/category-overrides.json.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}

@@ -32,7 +32,7 @@ export async function GET(request: Request) {
       `;
       let docs = rows;
       if (category) {
-        const overrides = readCategoryOverrides();
+        const overrides = await readCategoryOverrides();
         docs = docs.filter((doc) => {
           const tags = (doc.tags ?? []).map((t) => String(t).trim()).filter(Boolean);
           if (category === "Other") return documentBelongsToOnlyOther(tags, overrides);
@@ -75,7 +75,7 @@ export async function GET(request: Request) {
   });
 
   if (category) {
-    const overrides = readCategoryOverrides();
+    const overrides = await readCategoryOverrides();
     docs = docs.filter((doc) => {
       const tags = (doc.tags ?? []).map((t) => String(t).trim()).filter(Boolean);
       if (category === "Other") return documentBelongsToOnlyOther(tags, overrides);

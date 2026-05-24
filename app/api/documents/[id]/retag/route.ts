@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { readFileSync, existsSync } from "fs";
 import { prisma } from "@/lib/db";
-import { getUploadPath } from "@/lib/uploads";
+import { downloadFile } from "@/lib/bunny";
 import { extractFromImageBuffer, extractFromText, buildSearchText, normalizeTags, type ExtractedDoc } from "@/lib/extract";
 import { updateDocumentEmbedding } from "@/lib/embeddings";
 
@@ -34,11 +33,12 @@ export async function POST(
       );
     }
   } else if (doc.imagePath) {
-    const fullPath = getUploadPath(doc.imagePath);
-    if (!existsSync(fullPath)) {
+    let buffer: Buffer;
+    try {
+      buffer = await downloadFile(doc.imagePath);
+    } catch {
       return NextResponse.json({ error: "Image file not found" }, { status: 404 });
     }
-    const buffer = readFileSync(fullPath);
     try {
       const extracted = await extractFromImageBuffer(buffer, { userFeedback });
       extractedData = extracted as Record<string, unknown>;

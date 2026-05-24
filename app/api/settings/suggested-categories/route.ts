@@ -14,7 +14,7 @@ export type TagSuggestion = {
  * Each suggestion includes the top co-occurring tags to help users decide on a category name.
  */
 export async function GET() {
-  const overrides = readCategoryOverrides();
+  const overrides = await readCategoryOverrides();
 
   const docs = await prisma.document.findMany({
     select: { tags: true },

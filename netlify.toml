@@ -1,0 +1,17 @@
+[build]
+  command    = "npm run build"
+  publish    = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  # Synchronous function timeout in seconds.
+  # Free plan: max 10s. Pro plan: max 26s.
+  # AI extraction (OpenAI Vision) routinely takes 10-20s for large images/PDFs,
+  # so a Pro plan (or higher) is recommended.
+  timeout      = 26
+  node_bundler = "nft"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

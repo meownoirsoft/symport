@@ -9,8 +9,8 @@ import { readCategoryOverrides, getEffectiveCategories } from "@/lib/category-ov
  * A doc counts in Other only if it has no tag mapping to any other category (Other is the default for uncategorized).
  */
 export async function GET() {
-  const overrides = readCategoryOverrides();
-  const categories = getEffectiveCategories();
+  const overrides = await readCategoryOverrides();
+  const categories = await getEffectiveCategories();
   const docs = await prisma.document.findMany({
     select: { tags: true },
   });

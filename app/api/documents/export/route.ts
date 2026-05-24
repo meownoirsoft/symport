@@ -112,7 +112,7 @@ export async function GET(request: Request) {
   if (category) {
     const { getCategoryForTag, documentBelongsToOnlyOther } = await import("@/lib/document-categories");
     const { readCategoryOverrides } = await import("@/lib/category-overrides");
-    const overrides = readCategoryOverrides();
+    const overrides = await readCategoryOverrides();
     docs = docs.filter((doc) => {
       const tags = (doc.tags ?? []).map((t) => String(t).trim()).filter(Boolean);
       if (category === "Other") return documentBelongsToOnlyOther(tags, overrides);

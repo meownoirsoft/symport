@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { deleteUploadFile } from "@/lib/uploads";
+import { deleteFile } from "@/lib/bunny";
 import { buildSearchText, type ExtractedDoc } from "@/lib/extract";
 import { updateDocumentEmbedding } from "@/lib/embeddings";
 import { toSchemaOrgJsonLd } from "@/lib/document-schemas";
@@ -162,7 +162,7 @@ export async function DELETE(
   const doc = await prisma.document.findUnique({ where: { id } });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  if (doc.imagePath) deleteUploadFile(doc.imagePath);
+  if (doc.imagePath) await deleteFile(doc.imagePath);
   await prisma.document.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }

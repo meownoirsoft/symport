@@ -12,8 +12,8 @@ import {
 
 /** GET: return categories (effective list), tags per category, tagToCategory overrides, and categoryNotes. */
 export async function GET() {
-  const config = readCategoryConfig();
-  const categories = getEffectiveCategories();
+  const config = await readCategoryConfig();
+  const categories = await getEffectiveCategories();
   const tagToCategory = config.tagToCategory ?? {};
   const tagsByCategory: Record<string, string[]> = {};
   for (const cat of categories) {
@@ -45,8 +45,8 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const config = readCategoryConfig();
-  const effectiveCategories = getEffectiveCategories();
+  const config = await readCategoryConfig();
+  const effectiveCategories = await getEffectiveCategories();
   let tagToCategory = { ...(config.tagToCategory ?? {}) };
 
   const isValidCategory = (c: string) =>
@@ -57,7 +57,7 @@ export async function PATCH(request: Request) {
     if (!name) return NextResponse.json({ error: "Category name required" }, { status: 400 });
     if (effectiveCategories.includes(name)) return NextResponse.json({ error: "Category already exists" }, { status: 400 });
     const nextCategories = [...effectiveCategories.filter((c) => c !== "Other"), name, "Other"];
-    writeFullCategoryConfig({ categories: nextCategories, tagToCategory });
+    await writeFullCategoryConfig({ categories: nextCategories, tagToCategory });
     return NextResponse.json({ ok: true, categories: nextCategories });
   }
 
@@ -69,7 +69,7 @@ export async function PATCH(request: Request) {
     for (const tag of Object.keys(tagToCategory)) {
       if (tagToCategory[tag] === name) tagToCategory[tag] = null;
     }
-    writeFullCategoryConfig({ categories: nextCategories, tagToCategory });
+    await writeFullCategoryConfig({ categories: nextCategories, tagToCategory });
     return NextResponse.json({ ok: true, categories: nextCategories, overrides: tagToCategory });
   }
 
@@ -84,7 +84,7 @@ export async function PATCH(request: Request) {
     for (const tag of Object.keys(tagToCategory)) {
       if (tagToCategory[tag] === fromName) tagToCategory[tag] = toName;
     }
-    writeFullCategoryConfig({ categories: nextCategories, tagToCategory });
+    await writeFullCategoryConfig({ categories: nextCategories, tagToCategory });
     return NextResponse.json({ ok: true, categories: nextCategories, overrides: tagToCategory });
   }
 
@@ -92,7 +92,7 @@ export async function PATCH(request: Request) {
     if (!Array.isArray(body.categories)) return NextResponse.json({ error: "categories must be an array" }, { status: 400 });
     const other = "Other";
     const nextCategories = [...body.categories.filter((c: string) => c !== other), other];
-    writeFullCategoryConfig({ categories: nextCategories, tagToCategory });
+    await writeFullCategoryConfig({ categories: nextCategories, tagToCategory });
     return NextResponse.json({ ok: true, categories: nextCategories });
   }
 
@@ -107,7 +107,7 @@ export async function PATCH(request: Request) {
       else if (isValidCategory(v)) next[key] = v;
     }
     tagToCategory = next;
-    writeFullCategoryConfig({ ...config, tagToCategory });
+    await writeFullCategoryConfig({ ...config, tagToCategory });
     return NextResponse.json({ ok: true, overrides: next });
   }
 
@@ -120,7 +120,7 @@ export async function PATCH(request: Request) {
     tagToCategory = { ...tagToCategory };
     if (category === null) tagToCategory[key] = null;
     else tagToCategory[key] = category;
-    writeFullCategoryConfig({ ...config, tagToCategory });
+    await writeFullCategoryConfig({ ...config, tagToCategory });
     return NextResponse.json({ ok: true, overrides: tagToCategory });
   }
 
@@ -132,7 +132,7 @@ export async function PATCH(request: Request) {
     const categoryNotes = { ...(config.categoryNotes ?? {}) };
     if (note) categoryNotes[category] = note;
     else delete categoryNotes[category];
-    writeFullCategoryConfig({ ...config, categoryNotes });
+    await writeFullCategoryConfig({ ...config, categoryNotes });
     return NextResponse.json({ ok: true, categoryNotes });
   }
 

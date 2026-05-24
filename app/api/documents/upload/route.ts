@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { getUploadPath, ensureUploadDir } from "@/lib/uploads";
+import { uploadFile } from "@/lib/bunny";
 import { extractFromImageBuffer, extractFromPDF, buildSearchText, normalizeTags, type ExtractedDoc } from "@/lib/extract";
 import { updateDocumentEmbedding } from "@/lib/embeddings";
 import { sharpenAndEncode } from "@/lib/sharpen";
@@ -29,17 +29,13 @@ export async function POST(request: Request) {
   let savedFilename: string;
   let imageBuffer: Buffer | null = null;
 
-  ensureUploadDir();
-  const fs = await import("fs");
-  const { writeFile } = fs.promises;
-
   if (isPdf) {
     savedFilename = `${randomBytes(12).toString("hex")}.pdf`;
-    await writeFile(getUploadPath(savedFilename), rawBuffer);
+    await uploadFile(rawBuffer, savedFilename, "application/pdf");
   } else {
     savedFilename = `${randomBytes(12).toString("hex")}.jpg`;
     imageBuffer = await sharpenAndEncode(rawBuffer);
-    await writeFile(getUploadPath(savedFilename), imageBuffer);
+    await uploadFile(imageBuffer, savedFilename, "image/jpeg");
   }
 
   if (!process.env.OPENAI_API_KEY) {

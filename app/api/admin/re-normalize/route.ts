@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { normalizeExtractedData } from "@/lib/normalize-extraction";
 import { buildSearchText, type ExtractedDoc } from "@/lib/extract";
@@ -12,6 +14,10 @@ import { updateDocumentEmbedding } from "@/lib/embeddings";
  * Call after adding new schema kinds or changing the registry.
  */
 export async function POST() {
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const docs = await prisma.document.findMany({
     select: { id: true, extractedData: true },
   });

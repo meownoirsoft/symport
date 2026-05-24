@@ -110,7 +110,7 @@ async function getSemanticDocsForContexts(
     LIMIT ${SEMANTIC_LIMIT}
   `;
 
-  const overrides = readCategoryOverrides();
+  const overrides = await readCategoryOverrides();
 
   for (const label of contextLabels) {
     const matching = rows.filter((doc) => {
@@ -330,7 +330,7 @@ export async function buildContextPackage(contextLabels: ContextLabel[]): Promis
     return "The user has not selected any context. You have no document or prior analysis context.";
   }
 
-  const overrides = readCategoryOverrides();
+  const overrides = await readCategoryOverrides();
   const docs = await prisma.document.findMany({
     select: { tags: true, extractedData: true, searchText: true },
   });
@@ -421,7 +421,7 @@ export async function buildContextPackageForConversation(
           take: 200,
         })
       : null;
-  const overrides = readCategoryOverrides();
+  const overrides = await readCategoryOverrides();
 
   const allDocsForSummary = await prisma.document.findMany({
     select: { tags: true, extractedData: true },

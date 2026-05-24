@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { updateDocumentEmbedding } from "@/lib/embeddings";
 
@@ -7,6 +9,10 @@ import { updateDocumentEmbedding } from "@/lib/embeddings";
  * Use after adding pgvector to populate embeddings for existing documents.
  */
 export async function POST(request: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { searchParams } = new URL(request.url);
   const all = searchParams.get("all") === "1" || searchParams.get("all") === "true";
 
