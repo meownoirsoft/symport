@@ -15,6 +15,7 @@ function LoginInner() {
   const [error, setError] = useState<string | null>(null);
 
   const callbackUrl = searchParams.get("callbackUrl") || "/chat";
+  const justReset = searchParams.get("reset") === "1";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -51,6 +52,11 @@ function LoginInner() {
           </Link>
           .
         </p>
+        {justReset && (
+          <p className="text-sm text-emerald-600 dark:text-emerald-400 mb-4">
+            Password updated — sign in with your new password.
+          </p>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
@@ -86,6 +92,11 @@ function LoginInner() {
           >
             {loading ? "Signing in..." : "Sign in"}
           </button>
+          <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
+            <Link href="/forgot-password" className="underline">
+              Forgot password?
+            </Link>
+          </p>
         </form>
       </div>
       </div>

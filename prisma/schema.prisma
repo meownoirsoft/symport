@@ -130,3 +130,12 @@ model AppSetting {
   value     Json
   updatedAt DateTime @updatedAt
 }
+
+/// Short-lived token for the password-reset flow. Expires after 1 hour.
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}

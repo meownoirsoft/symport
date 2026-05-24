@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   devIndicators: false,
@@ -34,4 +35,19 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  // Source map upload — only runs when SENTRY_AUTH_TOKEN is present in the environment.
+  // Set SENTRY_ORG, SENTRY_PROJECT, and SENTRY_AUTH_TOKEN in Netlify build env vars
+  // to enable source maps for readable stack traces in Sentry.
+  silent: true,
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+
+  // Widen the files included when uploading source maps (catches dynamic imports)
+  widenClientFileUpload: true,
+
+  // Delete source map files after upload so they aren't served publicly
+  sourcemaps: {
+    filesToDeleteAfterUpload: [".next/static/**/*.map"],
+  },
+});
