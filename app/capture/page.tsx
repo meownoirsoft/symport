@@ -113,7 +113,7 @@ export default function CapturePage() {
                 guides={true}
                 viewMode={1}
                 dragMode="move"
-                autoCropArea={0.8}
+                autoCropArea={1}
               />
             </div>
             <div className="flex gap-2">

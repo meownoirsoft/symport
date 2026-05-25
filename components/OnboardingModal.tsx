@@ -20,7 +20,7 @@ export default function OnboardingModal() {
   };
 
   if (!show) return null;
-  if (pathname.startsWith("/login") || pathname.startsWith("/register")) return null;
+  if (pathname.startsWith("/login") || pathname.startsWith("/register") || pathname.startsWith("/forgot-password") || pathname.startsWith("/reset-password")) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
