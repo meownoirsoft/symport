@@ -142,22 +142,31 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       .then(applyDoc);
   }, [id]);
 
-  // Poll every 3s while extraction is still pending
+  // Poll every 3s while extraction is still pending.
+  // A doc is truly pending only if status==="pending" AND the title is still
+  // the placeholder (real data hasn't arrived yet). This guards against old
+  // documents that have real data but were never marked "done".
+  function isExtractionPending(d: Doc) {
+    if (d.status !== "pending") return false;
+    const t = d.extractedData?.title;
+    return !t || t === "Processing...";
+  }
+
   useEffect(() => {
     if (!id || !doc) return;
-    if (doc.status !== "pending") return;
+    if (!isExtractionPending(doc)) return;
     const timer = setInterval(() => {
       fetch(`/api/documents/${id}`)
         .then((r) => r.json())
         .then((d: Doc) => {
           applyDoc(d);
-          if (d.status !== "pending") clearInterval(timer);
+          if (!isExtractionPending(d)) clearInterval(timer);
         })
         .catch(() => {});
     }, 3000);
     return () => clearInterval(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, doc?.status]);
+  }, [id, doc?.status, doc?.extractedData?.title]);
 
   function displayTitle(data: Record<string, unknown>): string {
     if (typeof data.title === "string" && data.title.trim()) return data.title.trim();
@@ -482,7 +491,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
         </div>
       </header>
       <main className="max-w-4xl mx-auto px-4 py-4 flex flex-col gap-6">
-        {doc.status === "pending" && (
+        {isExtractionPending(doc) && (
           <div className="flex items-center gap-3 rounded-xl bg-sky-50 dark:bg-sky-950 border border-sky-200 dark:border-sky-800 px-4 py-3 text-sm text-sky-700 dark:text-sky-300">
             <svg className="animate-spin h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden>
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
