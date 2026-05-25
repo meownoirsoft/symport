@@ -7,18 +7,21 @@
  *   BUNNY_CDN_URL            — pull-zone URL, e.g. https://symport.b-cdn.net
  *
  * Optional env vars:
- *   BUNNY_STORAGE_HOSTNAME   — storage endpoint hostname.
- *                              Default: storage.bunnynet.com (Falkenstein)
- *                              Other regions: ny.storage.bunnynet.com,
- *                              uk.storage.bunnynet.com, la.storage.bunnynet.com,
- *                              sg.storage.bunnynet.com, syd.storage.bunnynet.com
+ *   BUNNY_STORAGE_HOSTNAME   — storage endpoint hostname (shown in Bunny dashboard
+ *                              under Storage → zone → FTP & API Access → Hostname).
+ *                              Examples: storage.bunnycdn.com (Frankfurt),
+ *                              la.storage.bunnycdn.com (Los Angeles),
+ *                              ny.storage.bunnycdn.com (New York),
+ *                              uk.storage.bunnycdn.com (London),
+ *                              sg.storage.bunnycdn.com (Singapore),
+ *                              syd.storage.bunnycdn.com (Sydney)
  */
 
 const ZONE = process.env.BUNNY_STORAGE_ZONE;
 const API_KEY = process.env.BUNNY_STORAGE_API_KEY;
 const CDN_URL = process.env.BUNNY_CDN_URL;
 const HOSTNAME =
-  process.env.BUNNY_STORAGE_HOSTNAME ?? "storage.bunnynet.com";
+  process.env.BUNNY_STORAGE_HOSTNAME ?? "la.storage.bunnycdn.com";
 
 function assertEnv(): void {
   if (!ZONE || !API_KEY || !CDN_URL) {
@@ -54,14 +57,26 @@ export async function uploadFile(
         "Content-Type": contentType,
       },
       body: blob,
+      redirect: "error", // don't silently follow redirects — a redirect means wrong zone/host
     });
   } catch (err) {
+    // "fetch failed" with redirect:"error" means the server redirected us,
+    // which usually means the storage zone name or hostname is wrong.
     const cause = (err as NodeJS.ErrnoException).cause ?? err;
+    const msg = String(cause);
+    if (msg.includes("redirect") || msg.includes("Redirect")) {
+      throw new Error(
+        `Bunny redirected the upload request — the storage zone name or hostname is wrong. ` +
+        `Zone=${ZONE} Host=${HOSTNAME}. Check BUNNY_STORAGE_ZONE and BUNNY_STORAGE_HOSTNAME in Netlify.`
+      );
+    }
     throw new Error(`Bunny fetch error uploading to ${url}: ${cause}`);
   }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Bunny upload failed (${res.status}): ${text}`);
+    throw new Error(
+      `Bunny upload failed (${res.status}) to ${url}: ${text || "(empty body)"}`
+    );
   }
 }
 
