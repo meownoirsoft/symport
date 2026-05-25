@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { extractFromText, buildSearchText, normalizeTags, type ExtractedDoc } from "@/lib/extract";
 import { updateDocumentEmbedding } from "@/lib/embeddings";
 
 export async function POST(request: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const body = await request.json().catch(() => ({}));
   const messageId = typeof body.messageId === "string" ? body.messageId.trim() : null;
   const content = typeof body.content === "string" ? body.content.trim() : null;
@@ -13,6 +21,12 @@ export async function POST(request: Request) {
   if (!messageId || !content) {
     return NextResponse.json({ error: "messageId and content are required" }, { status: 400 });
   }
+
+  // Verify the message belongs to this user via its conversation
+  const msg = await prisma.message.findFirst({
+    where: { id: messageId, conversation: { userId } },
+  });
+  if (!msg) return NextResponse.json({ error: "Message not found" }, { status: 404 });
 
   // Record capture in CapturedResponse
   await prisma.capturedResponse.create({
@@ -27,14 +41,14 @@ export async function POST(request: Request) {
     } catch {
       extractedData = {
         type: "general",
-        title: content.length > 80 ? `${content.slice(0, 77)}…` : content,
+        title: content.length > 80 ? `${content.slice(0, 77)}...` : content,
         summary: content,
       };
     }
   } else {
     extractedData = {
       type: "general",
-      title: content.length > 80 ? `${content.slice(0, 77)}…` : content,
+      title: content.length > 80 ? `${content.slice(0, 77)}...` : content,
       summary: content,
     };
   }
@@ -61,6 +75,7 @@ export async function POST(request: Request) {
       extractedData: jsonForDb,
       searchText,
       tags,
+      userId,
     },
   });
 

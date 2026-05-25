@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { toSchemaOrgJsonLd } from "@/lib/document-schemas";
 import type { DocumentKind } from "@/lib/document-schemas";
@@ -74,6 +76,12 @@ function toCsv(docs: DocRow[]): string {
 }
 
 export async function GET(request: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { searchParams } = new URL(request.url);
   const format = searchParams.get("format")?.toLowerCase();
   const q = searchParams.get("q")?.trim();
@@ -92,9 +100,10 @@ export async function GET(request: Request) {
   }
 
   const where: {
+    userId: string;
     searchText?: { contains: string; mode: "insensitive" };
     tags?: { has: string };
-  } = {};
+  } = { userId };
   if (q) where.searchText = { contains: q, mode: "insensitive" };
   if (tag) where.tags = { has: tag };
 

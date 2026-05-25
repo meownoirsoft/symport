@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { buildContextPackageForConversation } from "@/lib/context-assembly";
 
@@ -6,6 +8,12 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id: conversationId } = await params;
   const body = await request.json().catch(() => ({}));
 
@@ -15,7 +23,7 @@ export async function POST(
     typeof body.personaId === "string" ? body.personaId : null;
 
   const conversation = await prisma.conversation.findUnique({
-    where: { id: conversationId },
+    where: { id: conversationId, userId },
     include: {
       contexts: { select: { contextId: true } },
     },
@@ -43,6 +51,7 @@ export async function POST(
 
   const result = await buildContextPackageForConversation({
     conversationId,
+    userId,
     contextLabels,
     modelString: persona.modelString,
     latestUserMessage: content,
@@ -50,4 +59,3 @@ export async function POST(
 
   return NextResponse.json(result);
 }
-

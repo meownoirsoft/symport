@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { uploadFile, getFileUrl } from "@/lib/bunny";
 import { sharpenAndEncode } from "@/lib/sharpen";
@@ -7,8 +9,14 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id } = await params;
-  const doc = await prisma.document.findUnique({ where: { id } });
+  const doc = await prisma.document.findUnique({ where: { id, userId } });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!doc.imagePath) return NextResponse.json({ error: "No image (note document)" }, { status: 404 });
 
@@ -20,8 +28,14 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id } = await params;
-  const doc = await prisma.document.findUnique({ where: { id } });
+  const doc = await prisma.document.findUnique({ where: { id, userId } });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!doc.imagePath) return NextResponse.json({ error: "Cannot replace image on a note document" }, { status: 400 });
 

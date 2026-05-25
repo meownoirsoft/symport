@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
 function pickAmount(d: Record<string, unknown>): number | null {
@@ -23,10 +25,17 @@ function pickDate(d: Record<string, unknown>): string | null {
 }
 
 export async function GET(request: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { searchParams } = new URL(request.url);
   const year = searchParams.get("year")?.trim() || null;
 
   const docs = await prisma.document.findMany({
+    where: { userId },
     select: { id: true, tags: true, extractedData: true, status: true, createdAt: true },
   });
 

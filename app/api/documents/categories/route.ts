@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getCategoryForTag, documentBelongsToOnlyOther, type DocumentCategoryLabel } from "@/lib/document-categories";
 import { readCategoryOverrides, getEffectiveCategories } from "@/lib/category-overrides";
@@ -9,9 +11,16 @@ import { readCategoryOverrides, getEffectiveCategories } from "@/lib/category-ov
  * A doc counts in Other only if it has no tag mapping to any other category (Other is the default for uncategorized).
  */
 export async function GET() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const overrides = await readCategoryOverrides();
   const categories = await getEffectiveCategories();
   const docs = await prisma.document.findMany({
+    where: { userId },
     select: { tags: true },
   });
 

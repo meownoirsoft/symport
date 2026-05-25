@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { uploadFile } from "@/lib/bunny";
 import { extractFromImageBuffer, extractFromPDF, buildSearchText, normalizeTags, type ExtractedDoc } from "@/lib/extract";
@@ -10,6 +12,12 @@ import { randomBytes } from "crypto";
 const ACCEPTED_TYPES = ["image/", "application/pdf"];
 
 export async function POST(request: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const form = await request.formData();
   const file = form.get("file");
   if (!file || !(file instanceof File)) {
@@ -46,6 +54,7 @@ export async function POST(request: Request) {
         extractedData: { type: "general", title: "Document", summary: "Extraction skipped (no OPENAI_API_KEY)" },
         searchText: "Extraction skipped",
         tags: [],
+        userId,
       },
     });
     return NextResponse.json({ id: doc.id });
@@ -74,6 +83,7 @@ export async function POST(request: Request) {
       extractedData: extractedData as Prisma.InputJsonValue,
       searchText: searchText || null,
       tags,
+      userId,
     },
   });
 

@@ -1,13 +1,21 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id } = await params;
   const conversation = await prisma.conversation.findUnique({
-    where: { id },
+    where: { id, userId },
     include: {
       messages: {
         orderBy: { createdAt: "asc" },
@@ -24,6 +32,12 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
   const title = typeof body.title === "string" ? body.title.trim() || undefined : undefined;
@@ -34,7 +48,7 @@ export async function PATCH(
   const data: { title?: string } = {};
   if (title !== undefined) data.title = title;
 
-  const conversation = await prisma.conversation.findUnique({ where: { id } });
+  const conversation = await prisma.conversation.findUnique({ where: { id, userId } });
   if (!conversation) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (contextIds !== undefined) {
@@ -47,7 +61,7 @@ export async function PATCH(
   }
 
   const updated = await prisma.conversation.update({
-    where: { id },
+    where: { id, userId },
     data,
     include: { contexts: { select: { contextId: true } } },
   });

@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getCategoryForTag, documentBelongsToOnlyOther, type DocumentCategoryLabel } from "@/lib/document-categories";
 import { readCategoryOverrides } from "@/lib/category-overrides";
@@ -7,6 +9,12 @@ import { getEmbedding, embeddingToVectorLiteral } from "@/lib/embeddings";
 const SEMANTIC_LIMIT = 50;
 
 export async function GET(request: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q")?.trim();
   const tag = searchParams.get("tag")?.trim();
@@ -26,7 +34,7 @@ export async function GET(request: Request) {
       const rows = await prisma.$queryRaw<Row[]>`
         SELECT id, tags, "extractedData", "createdAt"
         FROM "Document"
-        WHERE embedding IS NOT NULL
+        WHERE embedding IS NOT NULL AND "userId" = ${userId}
         ORDER BY embedding <=> ${literal}::vector
         LIMIT ${SEMANTIC_LIMIT}
       `;
@@ -57,9 +65,10 @@ export async function GET(request: Request) {
   }
 
   const where: {
+    userId: string;
     searchText?: { contains: string; mode: "insensitive" };
     tags?: { has: string };
-  } = {};
+  } = { userId };
   if (q) where.searchText = { contains: q, mode: "insensitive" };
   if (tag) where.tags = { has: tag };
 

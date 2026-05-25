@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { deleteFile } from "@/lib/bunny";
 import { buildSearchText, type ExtractedDoc } from "@/lib/extract";
@@ -20,11 +22,17 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id } = await params;
   const { searchParams } = new URL(request.url);
   const format = searchParams.get("format")?.toLowerCase();
 
-  const doc = await prisma.document.findUnique({ where: { id } });
+  const doc = await prisma.document.findUnique({ where: { id, userId } });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (format === "schema.org") {
@@ -53,6 +61,12 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id } = await params;
   const body = await request.json();
   const rotation = normalizeRotation(body.rotation);
@@ -124,7 +138,7 @@ export async function PATCH(
   if (docStatus !== undefined) data.status = docStatus;
 
   if (title !== undefined || tags !== undefined || taxCategory !== undefined || hsaFsaEligible !== undefined || taxStatus !== undefined) {
-    const existing = await prisma.document.findUnique({ where: { id }, select: { extractedData: true } });
+    const existing = await prisma.document.findUnique({ where: { id, userId }, select: { extractedData: true } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
     const current = (existing.extractedData as Record<string, unknown>) ?? {};
     const merged = { ...current };
@@ -142,7 +156,7 @@ export async function PATCH(
   }
 
   const doc = await prisma.document.update({
-    where: { id },
+    where: { id, userId },
     data: {
       ...data,
       extractedData: data.extractedData as Prisma.InputJsonValue | undefined,
@@ -158,11 +172,17 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id } = await params;
-  const doc = await prisma.document.findUnique({ where: { id } });
+  const doc = await prisma.document.findUnique({ where: { id, userId } });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (doc.imagePath) await deleteFile(doc.imagePath);
-  await prisma.document.delete({ where: { id } });
+  await prisma.document.delete({ where: { id, userId } });
   return NextResponse.json({ ok: true });
 }

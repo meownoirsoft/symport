@@ -23,6 +23,10 @@ export type ContextItemRef =
 
 export interface BuildContextPackageOptions {
   conversationId: string;
+  /**
+   * The authenticated user's id. Used to scope all document queries.
+   */
+  userId: string;
   contextLabels: ContextLabel[];
   /**
    * Underlying OpenRouter model string for the selected persona.
@@ -81,6 +85,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 function makeCacheKey(opts: BuildContextPackageOptions): CacheKey {
   const normalizedMessage = opts.latestUserMessage.trim().slice(0, 512);
   return [
+    opts.userId,
     opts.conversationId,
     opts.contextLabels.slice().sort().join(","),
     opts.modelString ?? "unknown",
@@ -91,7 +96,8 @@ function makeCacheKey(opts: BuildContextPackageOptions): CacheKey {
 
 async function getSemanticDocsForContexts(
   contextLabels: ContextLabel[],
-  queryText: string
+  queryText: string,
+  userId: string
 ): Promise<Map<ContextLabel, SemanticDocRow[]>> {
   const byContext = new Map<ContextLabel, SemanticDocRow[]>();
   if (contextLabels.length === 0 || !queryText.trim()) return byContext;
@@ -105,7 +111,7 @@ async function getSemanticDocsForContexts(
   const rows = await prisma.$queryRaw<SemanticDocRow[]>`
     SELECT id, tags, "extractedData", "createdAt"
     FROM "Document"
-    WHERE embedding IS NOT NULL
+    WHERE embedding IS NOT NULL AND "userId" = ${userId}
     ORDER BY embedding <=> ${literal}::vector
     LIMIT ${SEMANTIC_LIMIT}
   `;
@@ -325,13 +331,14 @@ async function buildConversationHistoryBlock(
  * Legacy, non-token-aware context assembly. Kept for compatibility but
  * new call sites should use buildContextPackageForConversation.
  */
-export async function buildContextPackage(contextLabels: ContextLabel[]): Promise<string> {
+export async function buildContextPackage(contextLabels: ContextLabel[], userId: string): Promise<string> {
   if (contextLabels.length === 0) {
     return "The user has not selected any context. You have no document or prior analysis context.";
   }
 
   const overrides = await readCategoryOverrides();
   const docs = await prisma.document.findMany({
+    where: { userId },
     select: { tags: true, extractedData: true, searchText: true },
   });
 
@@ -364,7 +371,7 @@ export async function buildContextPackage(contextLabels: ContextLabel[]): Promis
 export async function buildContextPackageForConversation(
   opts: BuildContextPackageOptions
 ): Promise<BuildContextPackageResult> {
-  const { conversationId, contextLabels, modelString, latestUserMessage, taxYear } = opts;
+  const { conversationId, userId, contextLabels, modelString, latestUserMessage, taxYear } = opts;
 
   if (!contextLabels.length) {
     const contextPackage =
@@ -411,11 +418,13 @@ export async function buildContextPackageForConversation(
 
   const semanticByContext = await getSemanticDocsForContexts(
     contextLabels,
-    latestUserMessage
+    latestUserMessage,
+    userId
   );
   const fallbackDocs =
     semanticByContext.size === 0
       ? await prisma.document.findMany({
+          where: { userId },
           select: { id: true, tags: true, extractedData: true, createdAt: true },
           orderBy: { createdAt: "desc" },
           take: 200,
@@ -424,6 +433,7 @@ export async function buildContextPackageForConversation(
   const overrides = await readCategoryOverrides();
 
   const allDocsForSummary = await prisma.document.findMany({
+    where: { userId },
     select: { tags: true, extractedData: true },
   });
 

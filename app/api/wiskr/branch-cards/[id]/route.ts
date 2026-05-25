@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
   const status = typeof body.status === "string" ? body.status : undefined;
@@ -18,14 +26,15 @@ export async function PATCH(
     return NextResponse.json({ error: "Provide status and/or conversationId" }, { status: 400 });
   }
 
-  const card = await prisma.branchCard.findUnique({ where: { id } });
+  // Verify ownership via source conversation
+  const card = await prisma.branchCard.findFirst({
+    where: { id, sourceConversation: { userId } },
+  });
   if (!card) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  // If opening as side conversation, create a new conversation and link it
-  if (conversationId === null || (conversationId === "" && data.conversationId === null)) {
-    // explicit unset
-  } else if (conversationId) {
-    const conv = await prisma.conversation.findUnique({ where: { id: conversationId } });
+  // If linking to a branch conversation, verify that conversation also belongs to this user
+  if (conversationId) {
+    const conv = await prisma.conversation.findUnique({ where: { id: conversationId, userId } });
     if (!conv) return NextResponse.json({ error: "Conversation not found" }, { status: 400 });
   }
 
@@ -43,7 +52,19 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id } = await params;
-  await prisma.branchCard.delete({ where: { id } }).catch(() => null);
+  // Verify ownership before deleting
+  const card = await prisma.branchCard.findFirst({
+    where: { id, sourceConversation: { userId } },
+  });
+  if (!card) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  await prisma.branchCard.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }

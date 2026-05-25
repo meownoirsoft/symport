@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { openRouterChat, type OpenRouterMessage } from "@/lib/openrouter";
 import { buildContextPackageForConversation } from "@/lib/context-assembly";
@@ -7,7 +9,7 @@ import { getModelCapability } from "@/lib/model-capabilities";
 function autoTitle(content: string): string {
   const words = content.trim().split(/\s+/);
   const snippet = words.slice(0, 7).join(" ");
-  const title = words.length > 7 ? snippet + "…" : snippet;
+  const title = words.length > 7 ? snippet + "..." : snippet;
   return title.charAt(0).toUpperCase() + title.slice(1);
 }
 
@@ -15,7 +17,17 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id } = await params;
+  // Verify conversation belongs to this user
+  const conversation = await prisma.conversation.findUnique({ where: { id, userId } });
+  if (!conversation) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
   const messages = await prisma.message.findMany({
     where: { conversationId: id },
     orderBy: { createdAt: "asc" },
@@ -28,6 +40,12 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id: conversationId } = await params;
   const body = await request.json().catch(() => ({}));
   const content = typeof body.content === "string" ? body.content.trim() : "";
@@ -42,7 +60,7 @@ export async function POST(
   }
 
   const conversation = await prisma.conversation.findUnique({
-    where: { id: conversationId },
+    where: { id: conversationId, userId },
     include: {
       contexts: { select: { contextId: true } },
       messages: { orderBy: { createdAt: "asc" } },
@@ -63,6 +81,7 @@ export async function POST(
 
   const { contextPackage } = await buildContextPackageForConversation({
     conversationId,
+    userId,
     contextLabels,
     modelString: persona.modelString,
     latestUserMessage: content,
@@ -134,12 +153,12 @@ export async function POST(
   if (needsTitle) {
     generatedTitle = autoTitle(content);
     await prisma.conversation.update({
-      where: { id: conversationId },
+      where: { id: conversationId, userId },
       data: { title: generatedTitle, updatedAt: new Date() },
     });
   } else {
     await prisma.conversation.update({
-      where: { id: conversationId },
+      where: { id: conversationId, userId },
       data: { updatedAt: new Date() },
     });
   }

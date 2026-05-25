@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getCategoryForTag, documentBelongsToOnlyOther } from "@/lib/document-categories";
 import { readCategoryOverrides } from "@/lib/category-overrides";
@@ -14,9 +16,16 @@ export type TagSuggestion = {
  * Each suggestion includes the top co-occurring tags to help users decide on a category name.
  */
 export async function GET() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const overrides = await readCategoryOverrides();
 
   const docs = await prisma.document.findMany({
+    where: { userId },
     select: { tags: true },
   });
 

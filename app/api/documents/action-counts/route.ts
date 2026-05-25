@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
 /**
@@ -7,7 +9,14 @@ import { prisma } from "@/lib/db";
  * taxUnclaimed: docs with a meaningful tax_category whose tax_status is not "claimed".
  */
 export async function GET() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const docs = await prisma.document.findMany({
+    where: { userId },
     select: { status: true, extractedData: true },
   });
 
