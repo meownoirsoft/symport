@@ -77,6 +77,7 @@ type Doc = {
   tags?: string[];
   extractedData: Record<string, unknown>;
   extractionNotes?: string | null;
+  status?: string | null;
   createdAt: string;
 };
 
@@ -118,26 +119,45 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     params.then((p) => setId(p.id));
   }, [params]);
 
+  function applyDoc(d: Doc) {
+    setDoc(d);
+    if (typeof d.rotation === "number") setRotation(d.rotation);
+    setTitle(
+      typeof (d.extractedData as Record<string, unknown>)?.title === "string"
+        ? (d.extractedData as Record<string, unknown>).title as string
+        : ""
+    );
+    setTags(Array.isArray(d.tags) ? [...d.tags] : []);
+    setExtractionNotes(d.extractionNotes ?? "");
+    setNoteText(d.noteText ?? "");
+    setTaxCategory(typeof d.extractedData.tax_category === "string" ? d.extractedData.tax_category : "");
+    const hsa = d.extractedData.hsa_fsa_eligible;
+    setHsaFsaEligible(hsa === true ? "true" : hsa === false ? "false" : "");
+  }
+
   useEffect(() => {
     if (!id) return;
     fetch(`/api/documents/${id}`)
       .then((r) => r.json())
-      .then((d: Doc) => {
-        setDoc(d);
-        if (typeof d.rotation === "number") setRotation(d.rotation);
-        setTitle(
-          typeof (d.extractedData as Record<string, unknown>)?.title === "string"
-            ? (d.extractedData as Record<string, unknown>).title as string
-            : ""
-        );
-        setTags(Array.isArray(d.tags) ? [...d.tags] : []);
-        setExtractionNotes(d.extractionNotes ?? "");
-        setNoteText(d.noteText ?? "");
-        setTaxCategory(typeof d.extractedData.tax_category === "string" ? d.extractedData.tax_category : "");
-        const hsa = d.extractedData.hsa_fsa_eligible;
-        setHsaFsaEligible(hsa === true ? "true" : hsa === false ? "false" : "");
-      });
+      .then(applyDoc);
   }, [id]);
+
+  // Poll every 3s while extraction is still pending
+  useEffect(() => {
+    if (!id || !doc) return;
+    if (doc.status !== "pending") return;
+    const timer = setInterval(() => {
+      fetch(`/api/documents/${id}`)
+        .then((r) => r.json())
+        .then((d: Doc) => {
+          applyDoc(d);
+          if (d.status !== "pending") clearInterval(timer);
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, doc?.status]);
 
   function displayTitle(data: Record<string, unknown>): string {
     if (typeof data.title === "string" && data.title.trim()) return data.title.trim();
@@ -462,6 +482,15 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
         </div>
       </header>
       <main className="max-w-4xl mx-auto px-4 py-4 flex flex-col gap-6">
+        {doc.status === "pending" && (
+          <div className="flex items-center gap-3 rounded-xl bg-sky-50 dark:bg-sky-950 border border-sky-200 dark:border-sky-800 px-4 py-3 text-sm text-sky-700 dark:text-sky-300">
+            <svg className="animate-spin h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden>
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            Extracting document data — this page will update automatically…
+          </div>
+        )}
         {doc.imagePath ? (
           <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800">
             <div className="relative flex items-center justify-center min-h-[40vh]" style={{ transform: `rotate(${rotation}deg)` }}>

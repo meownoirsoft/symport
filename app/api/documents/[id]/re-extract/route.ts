@@ -67,6 +67,7 @@ export async function POST(
       extractedData: extractedData as Prisma.InputJsonValue,
       searchText: searchText || null,
       tags,
+      status: "done",
     },
   });
   await updateDocumentEmbedding(prisma, id, searchText || undefined);

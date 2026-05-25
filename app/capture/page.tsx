@@ -53,7 +53,8 @@ export default function CapturePage() {
       // Fire AI extraction in the background without blocking the redirect.
       // The document page will show "Processing..." until extraction completes.
       if (data.extracting) {
-        fetch(`/api/documents/${data.id}/re-extract`, { method: "POST" }).catch(() => {});
+        // keepalive: true keeps the request alive even after router.push() navigates away
+        fetch(`/api/documents/${data.id}/re-extract`, { method: "POST", keepalive: true }).catch(() => {});
       }
       router.push(`/documents/${data.id}`);
     } catch (err) {
