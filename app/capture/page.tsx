@@ -49,7 +49,12 @@ export default function CapturePage() {
       form.set("file", file);
       const res = await fetch("/api/documents/upload", { method: "POST", body: form });
       if (!res.ok) throw new Error((await res.text()) || res.statusText);
-      const data = (await res.json()) as { id: string };
+      const data = (await res.json()) as { id: string; extracting?: boolean };
+      // Fire AI extraction in the background without blocking the redirect.
+      // The document page will show "Processing..." until extraction completes.
+      if (data.extracting) {
+        fetch(`/api/documents/${data.id}/re-extract`, { method: "POST" }).catch(() => {});
+      }
       router.push(`/documents/${data.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");

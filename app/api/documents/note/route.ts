@@ -22,38 +22,19 @@ export async function POST(request: Request) {
   const text = typeof body.text === "string" ? body.text.trim() : "";
   if (!text) return NextResponse.json({ error: "Missing or empty text" }, { status: 400 });
 
-  if (!process.env.OPENAI_API_KEY) {
-    try {
-      const doc = await prisma.document.create({
-        data: {
-          imagePath: null,
-          noteText: text,
-          status: "pending",
-          extractedData: {
-            type: "general",
-            title: "Note",
-            summary: "Extraction skipped (no OPENAI_API_KEY)",
-          },
-          searchText: text.slice(0, 500),
-          tags: ["note"],
-          userId,
-        },
-      });
-      await updateDocumentEmbedding(prisma, doc.id, text.slice(0, 500));
-      return NextResponse.json({ id: doc.id });
-    } catch (err) {
-      console.error("Note create failed (no key):", err);
-      return NextResponse.json(
-        { error: err instanceof Error ? err.message : "Failed to save note" },
-        { status: 500 }
-      );
-    }
-  }
-
+  // Notes are short text — extraction is fast enough to do inline.
   let extractedData: Record<string, unknown>;
   try {
-    const extracted = await extractFromText(text);
-    extractedData = extracted as Record<string, unknown>;
+    if (process.env.OPENAI_API_KEY) {
+      const extracted = await extractFromText(text);
+      extractedData = extracted as Record<string, unknown>;
+    } else {
+      extractedData = {
+        type: "general",
+        title: "Note",
+        summary: "Extraction skipped (no OPENAI_API_KEY)",
+      };
+    }
   } catch (err) {
     extractedData = {
       type: "general",

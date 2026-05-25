@@ -4,8 +4,6 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { uploadFile } from "@/lib/bunny";
-import { extractFromImageBuffer, extractFromPDF, buildSearchText, normalizeTags, type ExtractedDoc } from "@/lib/extract";
-import { updateDocumentEmbedding } from "@/lib/embeddings";
 import { sharpenAndEncode } from "@/lib/sharpen";
 import { randomBytes } from "crypto";
 
@@ -35,60 +33,30 @@ export async function POST(request: Request) {
 
   // PDFs are stored as-is; images are sharpened and saved as JPEG
   let savedFilename: string;
-  let imageBuffer: Buffer | null = null;
 
   if (isPdf) {
     savedFilename = `${randomBytes(12).toString("hex")}.pdf`;
     await uploadFile(rawBuffer, savedFilename, "application/pdf");
   } else {
     savedFilename = `${randomBytes(12).toString("hex")}.jpg`;
-    imageBuffer = await sharpenAndEncode(rawBuffer);
+    const imageBuffer = await sharpenAndEncode(rawBuffer);
     await uploadFile(imageBuffer, savedFilename, "image/jpeg");
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    const doc = await prisma.document.create({
-      data: {
-        imagePath: savedFilename,
-        status: "pending",
-        extractedData: { type: "general", title: "Document", summary: "Extraction skipped (no OPENAI_API_KEY)" },
-        searchText: "Extraction skipped",
-        tags: [],
-        userId,
-      },
-    });
-    return NextResponse.json({ id: doc.id });
-  }
-
-  let extractedData: Record<string, unknown>;
-  try {
-    const extracted = isPdf
-      ? await extractFromPDF(rawBuffer)
-      : await extractFromImageBuffer(imageBuffer!);
-    extractedData = extracted as Record<string, unknown>;
-  } catch (err) {
-    extractedData = {
-      type: "general",
-      summary: "Extraction failed: " + (err instanceof Error ? err.message : "Unknown error"),
-    };
-  }
-
-  const searchText = buildSearchText(extractedData as ExtractedDoc);
-  const tags = normalizeTags(extractedData.tags);
-
+  // Create a pending record immediately — extraction happens via /re-extract
+  // to avoid hitting serverless function timeouts on large images/PDFs.
   const doc = await prisma.document.create({
     data: {
       imagePath: savedFilename,
       status: "pending",
-      extractedData: extractedData as Prisma.InputJsonValue,
-      searchText: searchText || null,
-      tags,
+      extractedData: { type: "general", title: "Processing...", summary: "" } as Prisma.InputJsonValue,
+      searchText: null,
+      tags: [],
       userId,
     },
   });
 
-  await updateDocumentEmbedding(prisma, doc.id, searchText || undefined);
-  return NextResponse.json({ id: doc.id });
+  return NextResponse.json({ id: doc.id, extracting: true });
 }
 
 // Suppress unused import warning — ACCEPTED_TYPES used for documentation only
