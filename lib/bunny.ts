@@ -39,14 +39,26 @@ export async function uploadFile(
   contentType: string
 ): Promise<void> {
   assertEnv();
-  const res = await fetch(storageUrl(filename), {
-    method: "PUT",
-    headers: {
-      AccessKey: API_KEY!,
-      "Content-Type": contentType,
-    },
-    body: new Uint8Array(buffer),
-  });
+  const url = storageUrl(filename);
+  let res: Response;
+  try {
+    // Use Blob to avoid detached ArrayBuffer issues in Lambda environments
+    // Copy bytes into a fresh Uint8Array so we don't share the detached ArrayBuffer
+    const copy = new Uint8Array(buffer.length);
+    buffer.copy(copy);
+    const blob = new Blob([copy], { type: contentType });
+    res = await fetch(url, {
+      method: "PUT",
+      headers: {
+        AccessKey: API_KEY!,
+        "Content-Type": contentType,
+      },
+      body: blob,
+    });
+  } catch (err) {
+    const cause = (err as NodeJS.ErrnoException).cause ?? err;
+    throw new Error(`Bunny fetch error uploading to ${url}: ${cause}`);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`Bunny upload failed (${res.status}): ${text}`);

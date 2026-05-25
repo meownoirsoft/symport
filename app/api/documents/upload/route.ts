@@ -7,8 +7,6 @@ import { uploadFile } from "@/lib/bunny";
 import { sharpenAndEncode } from "@/lib/sharpen";
 import { randomBytes } from "crypto";
 
-const ACCEPTED_TYPES = ["image/", "application/pdf"];
-
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
@@ -16,7 +14,13 @@ export async function POST(request: Request) {
   }
   const userId = session.user.id;
 
-  const form = await request.formData();
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch (err) {
+    return NextResponse.json({ error: "Failed to parse form: " + String(err) }, { status: 400 });
+  }
+
   const file = form.get("file");
   if (!file || !(file instanceof File)) {
     return NextResponse.json({ error: "Missing file" }, { status: 400 });
@@ -29,35 +33,46 @@ export async function POST(request: Request) {
     );
   }
 
-  const rawBuffer = Buffer.from(await file.arrayBuffer());
-
-  // PDFs are stored as-is; images are sharpened and saved as JPEG
-  let savedFilename: string;
-
-  if (isPdf) {
-    savedFilename = `${randomBytes(12).toString("hex")}.pdf`;
-    await uploadFile(rawBuffer, savedFilename, "application/pdf");
-  } else {
-    savedFilename = `${randomBytes(12).toString("hex")}.jpg`;
-    const imageBuffer = await sharpenAndEncode(rawBuffer);
-    await uploadFile(imageBuffer, savedFilename, "image/jpeg");
+  let rawBuffer: Buffer;
+  try {
+    rawBuffer = Buffer.from(await file.arrayBuffer());
+  } catch (err) {
+    return NextResponse.json({ error: "Failed to read file: " + String(err) }, { status: 400 });
   }
 
-  // Create a pending record immediately — extraction happens via /re-extract
-  // to avoid hitting serverless function timeouts on large images/PDFs.
-  const doc = await prisma.document.create({
-    data: {
-      imagePath: savedFilename,
-      status: "pending",
-      extractedData: { type: "general", title: "Processing...", summary: "" } as Prisma.InputJsonValue,
-      searchText: null,
-      tags: [],
-      userId,
-    },
-  });
+  let savedFilename: string;
+  try {
+    if (isPdf) {
+      savedFilename = `${randomBytes(12).toString("hex")}.pdf`;
+      await uploadFile(rawBuffer, savedFilename, "application/pdf");
+    } else {
+      savedFilename = `${randomBytes(12).toString("hex")}.jpg`;
+      const imageBuffer = await sharpenAndEncode(rawBuffer);
+      await uploadFile(imageBuffer, savedFilename, "image/jpeg");
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("Upload/sharpen failed:", msg);
+    return NextResponse.json({ error: "File processing failed: " + msg }, { status: 500 });
+  }
+
+  let doc: { id: string };
+  try {
+    doc = await prisma.document.create({
+      data: {
+        imagePath: savedFilename,
+        status: "pending",
+        extractedData: { type: "general", title: "Processing...", summary: "" } as Prisma.InputJsonValue,
+        searchText: null,
+        tags: [],
+        userId,
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("DB create failed:", msg);
+    return NextResponse.json({ error: "Database error: " + msg }, { status: 500 });
+  }
 
   return NextResponse.json({ id: doc.id, extracting: true });
 }
-
-// Suppress unused import warning — ACCEPTED_TYPES used for documentation only
-void ACCEPTED_TYPES;
