@@ -16,6 +16,8 @@
   ],
   "tagToCategory": {
     "tech": "Tech",
-    "creative": "Creative"
-  }
+    "creative": "Creative",
+    "aetna": "Medical"
+  },
+  "categoryNotes": {}
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -14,6 +15,7 @@ function LoginInner() {
   const [error, setError] = useState<string | null>(null);
 
   const callbackUrl = searchParams.get("callbackUrl") || "/chat";
+  const justReset = searchParams.get("reset") === "1";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,7 +38,9 @@ function LoginInner() {
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-6 py-8 shadow-sm">
+      <div className="w-full max-w-sm flex flex-col items-center gap-6">
+        <Image src="/logo.png" alt="Symport" width={160} height={160} className="rounded-2xl shadow" />
+      <div className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-6 py-8 shadow-sm">
         <h1 className="text-xl font-semibold mb-1 text-zinc-900 dark:text-zinc-50">Sign in</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-2">
           Sign in to Symport / Wiskr to access your documents and chat.
@@ -48,6 +52,11 @@ function LoginInner() {
           </Link>
           .
         </p>
+        {justReset && (
+          <p className="text-sm text-emerald-600 dark:text-emerald-400 mb-4">
+            Password updated — sign in with your new password.
+          </p>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
@@ -83,7 +92,13 @@ function LoginInner() {
           >
             {loading ? "Signing in..." : "Sign in"}
           </button>
+          <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
+            <Link href="/forgot-password" className="underline">
+              Forgot password?
+            </Link>
+          </p>
         </form>
+      </div>
       </div>
     </div>
   );

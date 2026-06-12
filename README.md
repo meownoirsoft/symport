@@ -1,53 +1,241 @@
 # Symport
 
-Capture paper. Extract data. Search and export.
+AI-powered document ingestion system that converts real-world paperwork into structured, searchable data.
 
-Mobile-first web app: capture documents (camera or file), AI extracts structured JSON, search and tag status, export JSON.
+Symport is a mobile-first web application that captures documents (camera or file upload), extracts structured information using AI vision models, and stores the results in a searchable database.
 
-## Setup
+The system acts as an AI-powered document ingestion pipeline, transforming real-world paperwork into structured JSON that can be searched, tagged, and exported for automation workflows.
 
-1. **Dependencies**
-   ```bash
-   npm install
-   ```
+---
 
-2. **Database** (choose one)
-   - **Docker (recommended):** `npm run docker:up` (Postgres on port 5433). If 5433 is in use, edit `docker-compose.yml` to use another port and set `DATABASE_URL` in `.env` accordingly.
-   - **Existing Postgres:** Create a database and user, set `DATABASE_URL` in `.env`.
+# Why This Exists
 
-3. **Env**
-   ```bash
-   cp .env.example .env
-   ```
-   Set `DATABASE_URL`. For AI extraction set `OPENAI_API_KEY` (optional for MVP — documents are stored with a placeholder extraction if unset).
+Managing physical paperwork is inefficient and error-prone.
 
-4. **Migrations**
-   ```bash
-   npm run db:migrate
-   ```
-   If you use `db:push` instead, run `npm run db:push` to create tables without migration history.
+Common examples include:
 
-5. **Run**
-   ```bash
-   npm run dev
-   ```
-   Open [http://localhost:3000](http://localhost:3000). Use **Capture** to add a document, **View documents** to search and open details. On a phone, open the same URL for camera-first capture.
+- medical EOBs
+- prescription receipts
+- insurance documents
+- utility bills
+- financial paperwork
 
-## Scripts
+Traditional document storage systems only store images or PDFs. They do not extract meaning from the documents.
 
-- `npm run dev` — Next.js dev server
-- `npm run build` / `npm run start` — Production
-- `npm run db:generate` — Generate Prisma client
-- `npm run db:migrate` — Run migrations (DB must be up)
-- `npm run db:push` — Push schema without migrations
-- `npm run docker:up` — Start Postgres in Docker
+Symport uses AI vision models to **interpret documents and convert them into structured data**, enabling search, tagging, and downstream automation.
 
-## MVP
+---
+## Architecture
 
-- Capture: mobile camera or file upload
-- Extract: OpenAI GPT-4o vision → JSON (rx_receipt, eob, utility_bill, general)
-- Document list with full-text search
-- Status tagging (pending, paid, submitted, etc.)
-- JSON export per document
+Symport converts real-world documents into structured records through an ingestion pipeline:
 
-Design: [docs/paperless-brain-design-doc.md](docs/paperless-brain-design-doc.md).
+```
+Document Capture (camera or upload)
+        ↓
+Image preprocessing
+        ↓
+AI Vision Extraction (GPT-4o)
+        ↓
+Structured JSON generation
+        ↓
+PostgreSQL storage
+        ↓
+Search + tagging interface
+        ↓
+Exportable structured data
+```
+
+
+---
+
+# Key Features
+
+### Mobile Document Capture
+Capture documents directly from a phone camera or upload files.
+
+### AI Vision Extraction
+Uses OpenAI GPT-4o Vision to extract structured JSON from document images.
+
+Supported document categories include:
+
+- prescription receipts
+- insurance EOBs
+- utility bills
+- general documents
+
+### Structured Data Storage
+Extracted data is stored as structured JSON in PostgreSQL for flexible querying and retrieval.
+
+### Full-Text Search
+Documents can be searched using keywords or metadata.
+
+### Status Tagging
+Documents can be tagged with workflow states such as:
+
+- pending
+- submitted
+- paid
+- archived
+
+### Data Export
+Each document can be exported as JSON for integration with other systems.
+
+---
+
+## Engineering Highlights
+
+• AI-powered document understanding using GPT-4o vision  
+• Structured JSON extraction from unstructured document images  
+• Mobile-first capture workflow for real-world inputs  
+• Full-stack implementation using Next.js, Node, Prisma, and PostgreSQL  
+• Extensible document schema supporting multiple document categories
+
+---
+
+# Example Extracted Data
+
+Example output generated from a utility bill:
+
+```json
+{
+  "document_type": "utility_bill",
+  "provider": "City Water Department",
+  "amount_due": 73.45,
+  "due_date": "2025-02-15",
+  "account_number": "****2391"
+}
+```
+
+# Technology Stack
+
+### Frontend
+- Next.js
+
+### Backend
+- Node.js API routes
+
+### Database
+- PostgreSQL + Prisma ORM
+### AI
+- OpenAI GPT-4o Vision
+
+### Infrastructure
+- Docker
+
+---
+
+# Development Setup
+
+## Install Dependencies
+
+```npm install```
+
+## Database
+
+Choose one option.
+
+### Option 1 — Docker (recommended)
+
+```npm run docker:up```
+
+Postgres will start on port **5433**.
+
+If port 5433 is already in use, edit `docker-compose.yml` and update the port and your `DATABASE_URL`.
+
+### Option 2 — Existing Postgres
+
+Create a database and user manually and set the connection string in `.env`.
+
+---
+
+## Environment Variables
+
+cp .env.example .env
+
+Set:
+
+DATABASE_URL=  
+OPENAI_API_KEY=
+
+If `OPENAI_API_KEY` is not set, documents will be stored with placeholder extraction data.
+
+---
+
+## Run Migrations
+
+```npm run db:migrate```
+
+Alternatively:
+
+```npm run db:push```
+
+This will create tables without migration history.
+
+---
+
+## Start Development Server
+
+```npm run dev```
+
+Open:
+
+http://localhost:3000
+
+Use **Capture** to upload a document or take a photo.  
+Use **View Documents** to search and inspect stored records.
+
+---
+
+# Scripts
+
+```
+npm run dev         # Start Next.js development server  
+npm run build       # Build production bundle  
+npm run start       # Start production server  
+  
+npm run db:generate # Generate Prisma client  
+npm run db:migrate  # Run database migrations  
+npm run db:push     # Push schema without migrations  
+  
+npm run docker:up   # Start Postgres in Docker
+```
+
+---
+
+# Project Status
+
+Active prototype. The project serves as an exploration of AI-powered document ingestion systems and practical workflows for turning unstructured documents into structured data.
+
+The system is evolving as part of ongoing experimentation with AI-powered document understanding and structured data extraction.
+
+---
+
+# Design Notes
+
+See the design document:
+
+docs/paperless-brain-design-doc.md
+
+This document describes the architecture and design decisions behind the system.
+
+---
+
+# Future Ideas
+
+Potential improvements include:
+
+- automatic document classification
+    
+- vector search across documents
+    
+- entity extraction improvements
+    
+- integration with personal knowledge systems
+    
+- automated workflow triggers
+    
+
+---
+# License
+
+MIT

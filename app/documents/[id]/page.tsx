@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Cropper, { type ReactCropperElement } from "react-cropper";
 import "react-cropper/node_modules/cropperjs/dist/cropper.css";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 function PrettyJson({ data, depth = 0 }: { data: unknown; depth?: number }) {
   if (data === null) {
@@ -75,6 +77,7 @@ type Doc = {
   tags?: string[];
   extractedData: Record<string, unknown>;
   extractionNotes?: string | null;
+  status?: string | null;
   createdAt: string;
 };
 
@@ -102,6 +105,12 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
   const [savingCrop, setSavingCrop] = useState(false);
   const [savingSharpen, setSavingSharpen] = useState(false);
   const [imageKey, setImageKey] = useState(0);
+  const [taxCategory, setTaxCategory] = useState<string>("");
+  const [hsaFsaEligible, setHsaFsaEligible] = useState<string>("");
+  const [savingTaxFields, setSavingTaxFields] = useState(false);
+  const [noteText, setNoteText] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [notePreview, setNotePreview] = useState(false);
   const cropModalCropperRef = useRef<ReactCropperElement>(null);
   const panStart = useRef({ x: 0, y: 0 });
   const isDragging = useRef(false);
@@ -110,22 +119,54 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     params.then((p) => setId(p.id));
   }, [params]);
 
+  function applyDoc(d: Doc) {
+    setDoc(d);
+    if (typeof d.rotation === "number") setRotation(d.rotation);
+    setTitle(
+      typeof (d.extractedData as Record<string, unknown>)?.title === "string"
+        ? (d.extractedData as Record<string, unknown>).title as string
+        : ""
+    );
+    setTags(Array.isArray(d.tags) ? [...d.tags] : []);
+    setExtractionNotes(d.extractionNotes ?? "");
+    setNoteText(d.noteText ?? "");
+    setTaxCategory(typeof d.extractedData.tax_category === "string" ? d.extractedData.tax_category : "");
+    const hsa = d.extractedData.hsa_fsa_eligible;
+    setHsaFsaEligible(hsa === true ? "true" : hsa === false ? "false" : "");
+  }
+
   useEffect(() => {
     if (!id) return;
     fetch(`/api/documents/${id}`)
       .then((r) => r.json())
-      .then((d: Doc) => {
-        setDoc(d);
-        if (typeof d.rotation === "number") setRotation(d.rotation);
-        setTitle(
-          typeof (d.extractedData as Record<string, unknown>)?.title === "string"
-            ? (d.extractedData as Record<string, unknown>).title as string
-            : ""
-        );
-        setTags(Array.isArray(d.tags) ? [...d.tags] : []);
-        setExtractionNotes(d.extractionNotes ?? "");
-      });
+      .then(applyDoc);
   }, [id]);
+
+  // Poll every 3s while extraction is still pending.
+  // A doc is truly pending only if status==="pending" AND the title is still
+  // the placeholder (real data hasn't arrived yet). This guards against old
+  // documents that have real data but were never marked "done".
+  function isExtractionPending(d: Doc) {
+    if (d.status !== "pending") return false;
+    const t = d.extractedData?.title;
+    return !t || t === "Processing...";
+  }
+
+  useEffect(() => {
+    if (!id || !doc) return;
+    if (!isExtractionPending(doc)) return;
+    const timer = setInterval(() => {
+      fetch(`/api/documents/${id}`)
+        .then((r) => r.json())
+        .then((d: Doc) => {
+          applyDoc(d);
+          if (!isExtractionPending(d)) clearInterval(timer);
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, doc?.status, doc?.extractedData?.title]);
 
   function displayTitle(data: Record<string, unknown>): string {
     if (typeof data.title === "string" && data.title.trim()) return data.title.trim();
@@ -149,6 +190,34 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       }
     } finally {
       setSavingTitle(false);
+    }
+  }
+
+  async function saveTaxFields(nextTaxCategory: string, nextHsaFsa: string) {
+    if (!id || savingTaxFields) return;
+    setSavingTaxFields(true);
+    try {
+      const body: Record<string, unknown> = {
+        tax_category: nextTaxCategory || null,
+        hsa_fsa_eligible: nextHsaFsa === "true" ? true : nextHsaFsa === "false" ? false : null,
+      };
+      const res = await fetch(`/api/documents/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok && doc) {
+        setDoc({
+          ...doc,
+          extractedData: {
+            ...doc.extractedData,
+            tax_category: body.tax_category,
+            hsa_fsa_eligible: body.hsa_fsa_eligible,
+          },
+        });
+      }
+    } finally {
+      setSavingTaxFields(false);
     }
   }
 
@@ -275,6 +344,26 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
   }, []);
 
+  async function saveNoteText() {
+    if (!id || savingNote) return;
+    setSavingNote(true);
+    try {
+      const res = await fetch(`/api/documents/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ noteText: noteText || null }),
+      });
+      if (res.ok && doc) setDoc({ ...doc, noteText: noteText || null });
+    } finally {
+      setSavingNote(false);
+    }
+  }
+
+  const renderedNote = useMemo(() => {
+    if (!notePreview || !noteText.trim()) return "";
+    return DOMPurify.sanitize(marked(noteText) as string);
+  }, [notePreview, noteText]);
+
   async function saveExtractionNotes() {
     if (!id || savingNotes) return;
     setSavingNotes(true);
@@ -393,20 +482,24 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             onChange={(e) => setTitle(e.target.value)}
             onBlur={saveTitle}
             placeholder={doc ? displayTitle(doc.extractedData) : "Document"}
-            className="flex-1 min-w-0 text-xl font-semibold bg-transparent border border-transparent hover:border-zinc-300 dark:hover:border-zinc-600 rounded px-2 py-1 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-500"
+            className="flex-1 min-w-0 text-xl font-semibold bg-transparent border border-zinc-300 dark:border-zinc-600 rounded px-2 py-1 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-500"
             aria-label="Document title"
           />
-          <button
-            type="button"
-            onClick={saveTitle}
-            disabled={savingTitle}
-            className="shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
-          >
-            {savingTitle ? "Saving…" : "Save"}
-          </button>
+          {savingTitle && (
+            <span className="shrink-0 text-xs text-zinc-400 dark:text-zinc-500">Saving…</span>
+          )}
         </div>
       </header>
       <main className="max-w-4xl mx-auto px-4 py-4 flex flex-col gap-6">
+        {isExtractionPending(doc) && (
+          <div className="flex items-center gap-3 rounded-xl bg-sky-50 dark:bg-sky-950 border border-sky-200 dark:border-sky-800 px-4 py-3 text-sm text-sky-700 dark:text-sky-300">
+            <svg className="animate-spin h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden>
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            Extracting document data — this page will update automatically…
+          </div>
+        )}
         {doc.imagePath ? (
           <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800">
             <div className="relative flex items-center justify-center min-h-[40vh]" style={{ transform: `rotate(${rotation}deg)` }}>
@@ -454,12 +547,46 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
               <span className="text-xs text-zinc-500 dark:text-zinc-400">Click image to zoom</span>
             </div>
           </div>
-        ) : doc.noteText ? (
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/80 p-5">
-            <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Note</p>
-            <pre className="whitespace-pre-wrap font-sans text-sm text-zinc-800 dark:text-zinc-200 max-h-[50vh] overflow-auto">
-              {doc.noteText}
-            </pre>
+        ) : doc.noteText !== undefined ? (
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60">
+              <span className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Note</span>
+              <div className="inline-flex rounded-lg border border-zinc-300 dark:border-zinc-600 overflow-hidden text-xs">
+                <button
+                  type="button"
+                  onClick={() => setNotePreview(false)}
+                  className={`px-3 py-1.5 ${!notePreview ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-medium" : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700"}`}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNotePreview(true)}
+                  className={`px-3 py-1.5 border-l border-zinc-300 dark:border-zinc-600 ${notePreview ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-medium" : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700"}`}
+                >
+                  Preview
+                </button>
+              </div>
+            </div>
+            {notePreview ? (
+              <div
+                className="px-5 py-4 min-h-[200px] prose prose-zinc dark:prose-invert max-w-none text-sm"
+                dangerouslySetInnerHTML={{ __html: renderedNote }}
+              />
+            ) : (
+              <textarea
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                onBlur={saveNoteText}
+                rows={12}
+                className="w-full px-4 py-3 text-sm font-mono resize-y bg-transparent focus:outline-none min-h-[200px]"
+              />
+            )}
+            {!notePreview && (
+              <div className="px-4 py-1.5 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60">
+                <p className="text-xs text-zinc-400 dark:text-zinc-500">{savingNote ? "Saving…" : "Autosaved when you leave the field"}</p>
+              </div>
+            )}
           </div>
         ) : null}
 
@@ -675,6 +802,46 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
           </div>
         </div>
 
+        <div>
+          <label className="block text-sm font-medium text-zinc-500 mb-1">Tax fields</label>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">Saved automatically when you change a value.</p>
+          <div className="flex gap-2">
+            <select
+              value={taxCategory}
+              onChange={(e) => {
+                setTaxCategory(e.target.value);
+                saveTaxFields(e.target.value, hsaFsaEligible);
+              }}
+              disabled={savingTaxFields}
+              className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm disabled:opacity-50"
+              aria-label="Tax category"
+            >
+              <option value="">Tax category…</option>
+              <option value="medical">Tax: Medical</option>
+              <option value="charity">Tax: Charity</option>
+              <option value="tax_payment">Tax: Tax payment</option>
+              <option value="mortgage_interest">Tax: Mortgage interest</option>
+              <option value="business_expense">Tax: Business expense</option>
+              <option value="personal">Tax: Personal</option>
+              <option value="unknown">Tax: Unknown</option>
+            </select>
+            <select
+              value={hsaFsaEligible}
+              onChange={(e) => {
+                setHsaFsaEligible(e.target.value);
+                saveTaxFields(taxCategory, e.target.value);
+              }}
+              disabled={savingTaxFields}
+              className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm disabled:opacity-50"
+              aria-label="HSA/FSA eligible"
+            >
+              <option value="">HSA/FSA eligibility…</option>
+              <option value="true">HSA/FSA eligible</option>
+              <option value="false">Not eligible</option>
+            </select>
+          </div>
+        </div>
+
         <div className="min-w-0">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-zinc-500">Extracted data</span>
@@ -693,7 +860,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
 
         <div>
           <label className="block text-sm font-medium text-zinc-500 mb-2">
-            Extraction feedback / notes
+            Extraction feedback
           </label>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
             Describe what was wrong or how to identify similar docs. Saved notes are used when you Re-extract.
@@ -713,7 +880,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
               disabled={savingNotes}
               className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
             >
-              {savingNotes ? "Saving…" : "Save notes"}
+              {savingNotes ? "Saving…" : "Save feedback"}
             </button>
             <button
               type="button"

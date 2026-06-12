@@ -58,6 +58,33 @@ function pickString(v: unknown): string | null {
   return s || null;
 }
 
+function pickBoolean(v: unknown): boolean | null {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase();
+    if (s === "true" || s === "yes" || s === "1") return true;
+    if (s === "false" || s === "no" || s === "0") return false;
+  }
+  return null;
+}
+
+const TAX_CATEGORY_VALUES = new Set([
+  "medical",
+  "charity",
+  "tax_payment",
+  "mortgage_interest",
+  "business_expense",
+  "personal",
+  "unknown",
+]);
+
+function pickTaxCategory(v: unknown): string | null {
+  const s = pickString(v);
+  if (!s) return null;
+  const normalized = s.toLowerCase().replace(/[\s-]+/g, "_");
+  return TAX_CATEGORY_VALUES.has(normalized) ? normalized : "unknown";
+}
+
 /** Multi-source value resolution for receipt. */
 function applyReceiptValues(
   result: Record<string, unknown>,
@@ -143,6 +170,80 @@ function ensureStandardFields(
   }
 }
 
+/** Coerce tax_category and hsa_fsa_eligible to canonical types if present. */
+function applyTaxFields(
+  result: Record<string, unknown>,
+  raw: Record<string, unknown>
+): void {
+  if ("tax_category" in raw) {
+    result.tax_category = pickTaxCategory(raw.tax_category);
+  }
+  if ("hsa_fsa_eligible" in raw) {
+    result.hsa_fsa_eligible = pickBoolean(raw.hsa_fsa_eligible);
+  }
+}
+
+function formatTitleDate(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null;
+  const m = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return `${parseInt(m[2])}/${parseInt(m[3])}/${m[1].slice(2)}`;
+}
+
+function extractTypeLabel(aiTitle: string, kind: string): string {
+  const t = aiTitle.toLowerCase();
+  if (t.includes("prescription") || t.includes(" rx")) return "Rx";
+  if (t.includes("receipt")) return "Receipt";
+  if (t.includes("eob") || t.includes("explanation of benefit")) return "EOB";
+  if (t.includes("invoice")) return "Invoice";
+  if (t.includes("bill")) return "Bill";
+  if (t.includes("statement")) return "Statement";
+  if (t.includes("claim")) return "Claim";
+  if (t.includes("record")) return "Record";
+  if (kind === "receipt") return "Receipt";
+  if (kind === "financial") return "Statement";
+  return aiTitle;
+}
+
+function buildRichTitle(result: Record<string, unknown>, raw: Record<string, unknown>): string | null {
+  const dateStr =
+    formatTitleDate(result.date as string | null) ??
+    formatTitleDate(result.due_date as string | null) ??
+    formatTitleDate(raw.service_date as string | null) ??
+    formatTitleDate(raw.date_issued as string | null);
+
+  const entity =
+    pickString(raw.vendor) ??
+    pickString(raw.pharmacy) ??
+    pickString(raw.merchant) ??
+    pickString(raw.store) ??
+    pickString(raw.provider) ??
+    pickString(raw.insurer) ??
+    pickString(raw.party) ??
+    pickString(raw.utility) ??
+    pickString(result.vendor as unknown) ??
+    pickString(result.party as unknown);
+
+  const aiTitle = pickString(raw.title) ?? "";
+  const kind = String(result.doc_category ?? "general");
+  const isGeneric = !aiTitle || /^(document|general|note|unknown)$/i.test(aiTitle);
+
+  if (!entity && !dateStr && isGeneric) return null;
+
+  if (entity) {
+    const typeLabel = isGeneric ? "" : extractTypeLabel(aiTitle, kind);
+    const namePart =
+      typeLabel && typeLabel.toLowerCase() !== entity.toLowerCase()
+        ? `${entity} ${typeLabel}`
+        : entity;
+    return dateStr ? `${namePart} — ${dateStr}` : namePart;
+  }
+
+  if (!isGeneric && dateStr) return `${aiTitle} — ${dateStr}`;
+  if (dateStr) return dateStr;
+  return null;
+}
+
 /**
  * Normalize raw extraction into a consistent shape using the schema
  * registry. Kind is derived from raw data; aliases are applied and
@@ -157,7 +258,11 @@ export function normalizeExtractedData(raw: Record<string, unknown>): Record<str
   if (kind === "financial") applyFinancialValues(result, raw);
 
   if (schema.aliases) applyAliases(result, raw, schema.aliases);
+  applyTaxFields(result, raw);
   ensureStandardFields(result, schema.standardFields);
+
+  const richTitle = buildRichTitle(result, raw);
+  if (richTitle) result.title = richTitle;
 
   return result;
 }

@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
@@ -8,27 +9,32 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  name         String?
-  passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String        @id @default(cuid())
+  email         String        @unique
+  name          String?
+  passwordHash  String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  documents     Document[]
+  conversations Conversation[]
+  savedPrompts  SavedPrompt[]
 }
 
 model Document {
-  id            String   @id @default(cuid())
-  imagePath     String?  // relative path under uploads dir; null for note-only docs
-  noteText      String?  // raw text for note docs (no image)
-  status        String   @default("pending") // pending | paid | unpaid | submitted | reimbursed | not_eligible
-  rotation      Int      @default(0) // display rotation in degrees: 0, 90, 180, 270
-  extractedData Json     // type-specific JSON from AI
-  searchText    String?  // denormalized text for full-text search (summary + key fields)
-  embedding     Unsupported("vector(1536)")? // pgvector for semantic search (Wiskr)
-  tags         String[] @default([]) // AI-suggested + user-editable labels (e.g. medical, receipt, tax)
-  extractionNotes String? // user feedback to improve extraction or correct mistakes
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id              String   @id @default(cuid())
+  imagePath       String?  // relative path under uploads dir; null for note-only docs
+  noteText        String?  // raw text for note docs (no image)
+  status          String   @default("pending") // pending | paid | unpaid | submitted | reimbursed | not_eligible
+  rotation        Int      @default(0) // display rotation in degrees: 0, 90, 180, 270
+  extractedData   Json     // type-specific JSON from AI
+  searchText      String?  // denormalized text for full-text search (summary + key fields)
+  embedding       Unsupported("vector(1536)")? // pgvector for semantic search (Wiskr)
+  tags            String[] @default([]) // AI-suggested + user-editable labels (e.g. medical, receipt, tax)
+  extractionNotes String?  // user feedback to improve extraction or correct mistakes
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 // --- Wiskr: multi-model chat on top of Symport context ---
@@ -52,6 +58,8 @@ model Conversation {
   parentConversationId  String?
   parentConversation    Conversation?  @relation("BranchConversations", fields: [parentConversationId], references: [id])
   branches              Conversation[] @relation("BranchConversations")
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id])
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
   contexts              ConversationContext[]
@@ -59,6 +67,7 @@ model Conversation {
   branchCards           BranchCard[]     @relation("SourceConversation")
   branchConversations   BranchCard[]     @relation("BranchConversation")
   nextQuestions         NextQuestion[]
+  savedPrompts          SavedPrompt[]
 }
 
 model ConversationContext {
@@ -105,6 +114,16 @@ model BranchCard {
   createdAt             DateTime  @default(now())
 }
 
+model SavedPrompt {
+  id                   String        @id @default(cuid())
+  content              String
+  sourceConversationId String?
+  sourceConversation   Conversation? @relation(fields: [sourceConversationId], references: [id], onDelete: SetNull)
+  userId               String
+  user                 User          @relation(fields: [userId], references: [id])
+  createdAt            DateTime      @default(now())
+}
+
 model NextQuestion {
   id             String   @id @default(cuid())
   conversationId String
@@ -112,4 +131,21 @@ model NextQuestion {
   content        String
   used           Boolean  @default(false)
   createdAt      DateTime @default(now())
+}
+
+/// Generic key-value store for app-wide settings.
+/// Replaces the filesystem-based data/category-overrides.json.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+/// Short-lived token for the password-reset flow. Expires after 1 hour.
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 }

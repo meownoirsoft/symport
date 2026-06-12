@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { timeAgo } from "@/lib/time-ago";
@@ -13,6 +13,9 @@ type Persona = {
   provider: string;
   modelString: string;
   avatarUrl?: string | null;
+  provider?: string | null;
+  modelString?: string | null;
+  description?: string | null;
 };
 type Conversation = {
   id: string;
@@ -40,6 +43,77 @@ type BranchCard = {
   createdAt: string;
   sourceMessage?: { id: string; content: string; role: string } | null;
 };
+
+const CONTEXT_COLORS: Record<string, { chip: string; rgb: string }> = {
+  Medical:   { chip: "bg-sky-100 text-sky-800 hover:bg-sky-200 dark:bg-sky-900/60 dark:text-sky-200 dark:hover:bg-sky-800",         rgb: "14,165,233" },
+  Tax:       { chip: "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/60 dark:text-amber-200 dark:hover:bg-amber-800", rgb: "245,158,11" },
+  "HSA/FSA": { chip: "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/60 dark:text-emerald-200 dark:hover:bg-emerald-800", rgb: "16,185,129" },
+  Insurance: { chip: "bg-violet-100 text-violet-800 hover:bg-violet-200 dark:bg-violet-900/60 dark:text-violet-200 dark:hover:bg-violet-800", rgb: "139,92,246" },
+};
+const DEFAULT_CHIP_CLASS = "bg-zinc-200 text-zinc-700 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600";
+
+function contextBarStyle(contextIds: string[]): React.CSSProperties {
+  if (contextIds.length === 0) return {};
+  const rgbs = contextIds.map((id) => CONTEXT_COLORS[id]?.rgb ?? "161,161,170");
+  if (rgbs.length === 1) return { backgroundColor: `rgba(${rgbs[0]},0.09)` };
+  return { background: `linear-gradient(to right, rgba(${rgbs[0]},0.13), rgba(${rgbs[rgbs.length - 1]},0.13))` };
+}
+
+const CONTEXT_PROMPTS: Record<string, string[]> = {
+  Medical: [
+    "What were my total medical expenses this year?",
+    "Which of my expenses are HSA or FSA eligible?",
+    "Summarize my recent doctor and pharmacy visits.",
+    "Do I have any unpaid medical bills?",
+  ],
+  Tax: [
+    "What deductions do I have available this tax year?",
+    "Summarize my charitable donations.",
+    "What business expenses can I claim?",
+    "Am I missing any common deductions?",
+  ],
+  "HSA/FSA": [
+    "What's my total HSA-eligible spending so far?",
+    "Which expenses are still pending reimbursement?",
+    "Show me my HSA spending by category.",
+    "What can I still submit for reimbursement?",
+  ],
+  Insurance: [
+    "What claims have I filed recently?",
+    "What's my out-of-pocket spending after insurance?",
+    "Which providers have I visited this year?",
+    "Are there any claims I should follow up on?",
+  ],
+  Other: [
+    "Summarize the documents in this context.",
+    "What patterns do you notice in my documents?",
+    "Are there any important dates or deadlines I should know about?",
+  ],
+};
+
+const GENERIC_PROMPTS = [
+  "What's in my documents?",
+  "Summarize what you know about my situation.",
+  "Are there any important items I should follow up on?",
+  "What patterns do you notice across my documents?",
+];
+
+function getSuggestedPrompts(contextLabels: string[]): string[] {
+  const seen = new Set<string>();
+  const prompts: string[] = [];
+  for (const label of contextLabels) {
+    const candidates = CONTEXT_PROMPTS[label] ?? GENERIC_PROMPTS;
+    for (const p of candidates) {
+      if (!seen.has(p)) { seen.add(p); prompts.push(p); }
+      if (prompts.length >= 4) return prompts;
+    }
+  }
+  for (const p of GENERIC_PROMPTS) {
+    if (!seen.has(p)) { seen.add(p); prompts.push(p); }
+    if (prompts.length >= 4) return prompts;
+  }
+  return prompts;
+}
 
 const PERSONA_AVATAR: Record<string, string> = {
   Quest: "🧭",
@@ -117,6 +191,7 @@ export default function ChatPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [input, setInput] = useState("");
   const [personaId, setPersonaId] = useState<string>("");
+  const [chatYear, setChatYear] = useState<string>("all");
   const [sending, setSending] = useState(false);
   const [creating, setCreating] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
@@ -131,6 +206,7 @@ export default function ChatPage() {
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ bottom: number; right: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const personaSelectRef = useRef<HTMLSelectElement | null>(null);
 
   const [selectionMenu, setSelectionMenu] = useState<{
     messageId: string;
@@ -146,6 +222,7 @@ export default function ChatPage() {
   const [capturing, setCapturing] = useState(false);
   const [renamingTitle, setRenamingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [toast, setToast] = useState<string | null>(null);
   const [showConversationsPanel, setShowConversationsPanel] = useState(false);
   const [showSymportPanel, setShowSymportPanel] = useState(false);
   const [symportCategory, setSymportCategory] = useState<string>("");
@@ -157,7 +234,9 @@ export default function ChatPage() {
   const [contextPreviewText, setContextPreviewText] = useState<string>("");
   const [contextPreviewLoading, setContextPreviewLoading] = useState(false);
   const [contextPreviewError, setContextPreviewError] = useState<string | null>(null);
-  const [branchDrawerMode, setBranchDrawerMode] = useState<"branches" | "conversations">("branches");
+  const [branchDrawerMode, setBranchDrawerMode] = useState<"chats" | "branches" | "queue">("chats");
+  const [panelSearch, setPanelSearch] = useState("");
+  const [savedPrompts, setSavedPrompts] = useState<{ id: string; content: string; sourceConversation: { id: string; title: string | null } | null; createdAt: string }[]>([]);
   const [contextChangedSuggestNewConversation, setContextChangedSuggestNewConversation] = useState(false);
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
   const [showPersonaMenu, setShowPersonaMenu] = useState(false);
@@ -237,11 +316,47 @@ export default function ChatPage() {
     if (res.ok) setBranchCards(await res.json());
   }, [selectedId]);
 
+  const loadSavedPrompts = useCallback(async () => {
+    const res = await fetch("/api/saved-prompts");
+    if (res.ok) setSavedPrompts(await res.json());
+  }, []);
+
+  const savePromptToQueue = async (content: string) => {
+    try {
+      const res = await fetch("/api/saved-prompts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, sourceConversationId: selectedId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setToast("Failed to save prompt: " + (err.error ?? res.status));
+        setTimeout(() => setToast(null), 4000);
+        return;
+      }
+      await loadSavedPrompts();
+      setPanelSearch("");
+      setBranchDrawerMode("queue");
+      setBranchDrawerOpen(true);
+      setToast("Saved to prompt queue.");
+      setTimeout(() => setToast(null), 3000);
+    } catch (e) {
+      setToast("Failed to save prompt: " + (e instanceof Error ? e.message : "network error"));
+      setTimeout(() => setToast(null), 4000);
+    }
+  };
+
+  const deleteSavedPrompt = async (id: string) => {
+    setSavedPrompts((prev) => prev.filter((p) => p.id !== id));
+    await fetch(`/api/saved-prompts/${id}`, { method: "DELETE" });
+  };
+
   useEffect(() => {
     loadPersonas();
     loadConversations();
     loadCategories();
-  }, [loadPersonas, loadConversations, loadCategories]);
+    loadSavedPrompts();
+  }, [loadPersonas, loadConversations, loadCategories, loadSavedPrompts]);
 
   // Persist selected conversation so it survives navigation away and back.
   useEffect(() => {
@@ -564,6 +679,8 @@ export default function ChatPage() {
       });
       if (res.ok) {
         setWiskrCaptureMessage(null);
+        setToast("Saved to Symport — it's now searchable in your documents.");
+        setTimeout(() => setToast(null), 4000);
       } else {
         const err = await res.json().catch(() => ({}));
         alert(err?.error ?? "Failed to capture");
@@ -607,16 +724,29 @@ export default function ChatPage() {
       const res = await fetch(`/api/wiskr/conversations/${convId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text, personaId: personaId || undefined }),
+        body: JSON.stringify({
+          content: text,
+          personaId: personaId || undefined,
+          taxYear: chatYear !== "all" ? chatYear : undefined,
+        }),
       });
       if (res.ok) {
-        const { assistantMessage } = await res.json();
+        const { assistantMessage, generatedTitle } = await res.json();
         const userMsg = { id: `user-${Date.now()}`, role: "user", content: text, createdAt: new Date().toISOString() };
         setConversation((prev) =>
           prev
-            ? { ...prev, messages: [...prev.messages, userMsg, assistantMessage] }
-            : { id: convId!, title: "New conversation", messages: [userMsg, assistantMessage], contexts: [] }
+            ? {
+                ...prev,
+                title: generatedTitle ?? prev.title,
+                messages: [...prev.messages, userMsg, assistantMessage],
+              }
+            : { id: convId!, title: generatedTitle ?? "New conversation", messages: [userMsg, assistantMessage], contexts: [] }
         );
+        if (generatedTitle) {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === convId ? { ...c, title: generatedTitle } : c))
+          );
+        }
       } else {
         const err = await res.json().catch(() => ({}));
         setInput(text);
@@ -661,7 +791,7 @@ export default function ChatPage() {
     personas.find((p) => p.id === personaId) ?? (personas.length ? personas[0] : null);
 
   return (
-    <div className="h-[calc(100vh-3.5rem)] bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col max-w-2xl mx-auto">
+    <div className="h-[calc(100vh-3.5rem)] bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 flex flex-col max-w-2xl mx-auto">
       <header className="border-b border-zinc-200 dark:border-zinc-800 px-4 py-3 grid grid-cols-[auto_1fr_auto] items-center gap-2">
         {/* Left: chevron + Symport label */}
         <div className="flex items-center gap-1">
@@ -757,35 +887,16 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Right: Chats label + chevron + Branches pill */}
+        {/* Right: Panel button */}
         <div className="flex items-center justify-end gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => setShowConversationsPanel(true)}
-            className="text-sm text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100"
+            onClick={() => setBranchDrawerOpen((o) => !o)}
+            className="flex items-center gap-1 text-sm font-medium rounded-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+            title="Conversations, branches & prompt queue"
           >
-            Chats
+            Panel <span className="opacity-60">›</span>
           </button>
-          <button
-            type="button"
-            className="text-3xl px-1 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-            onClick={() => setShowConversationsPanel(true)}
-            title="Open conversations"
-          >
-            »
-          </button>
-          {selectedId && branchCards.length > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                setBranchDrawerMode("branches");
-                setBranchDrawerOpen(true);
-              }}
-              className="text-xs rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 px-2 py-0.5 font-medium"
-            >
-              Branches ({branchCards.length})
-            </button>
-          )}
         </div>
       </header>
 
@@ -798,13 +909,16 @@ export default function ChatPage() {
           ) : (
             <>
               {/* Top bar: context chips (tap to remove) + add/edit */}
-              <div className="px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center gap-1.5">
+              <div
+                className="px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center gap-1.5 transition-colors duration-300"
+                style={contextBarStyle((conversation?.contexts ?? []).map((c) => c.contextId))}
+              >
                 {conversation?.contexts.map((c) => (
                   <button
                     key={c.contextId}
                     type="button"
                     onClick={() => removeContext(c.contextId)}
-                    className="text-xs rounded-full bg-zinc-200 dark:bg-zinc-700 px-2 py-0.5 hover:bg-zinc-300 dark:hover:bg-zinc-600"
+                    className={`text-xs rounded-full px-2.5 py-1 font-medium transition-colors ${CONTEXT_COLORS[c.contextId]?.chip ?? DEFAULT_CHIP_CLASS}`}
                     title="Remove context"
                   >
                     {c.contextId} ×
@@ -818,6 +932,24 @@ export default function ChatPage() {
                 >
                   + Contexts
                 </button>
+                <Link
+                  href="/settings/categories"
+                  className="text-xs text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300"
+                  title="Manage categories"
+                >
+                  Manage
+                </Link>
+                <select
+                  value={chatYear}
+                  onChange={(e) => setChatYear(e.target.value)}
+                  className="ml-auto text-xs rounded-full border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 px-2 py-0.5 focus:outline-none"
+                  title="Filter context by year"
+                >
+                  <option value="all">All years</option>
+                  {Array.from({ length: new Date().getFullYear() - 2019 }, (_, i) => String(new Date().getFullYear() - i)).map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
               </div>
               {contextChangedSuggestNewConversation && conversation && conversation.messages.length > 0 && (
                 <div className="px-3 py-2 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800 flex flex-wrap items-center gap-2 text-sm">
@@ -843,7 +975,33 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
-              <div className="flex-1 overflow-auto p-4 space-y-4">
+              <div className="flex-1 overflow-auto p-4 space-y-4 bg-zinc-50 dark:bg-zinc-950">
+                {conversation && conversation.messages.length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-full gap-6 py-8 text-center">
+                    {conversation.contexts.length === 0 ? (
+                      <div className="max-w-xs">
+                        <p className="text-zinc-500 dark:text-zinc-400 text-base mb-2">No contexts selected.</p>
+                        <p className="text-zinc-400 dark:text-zinc-500 text-sm">Add a context above so the AI can reference your documents.</p>
+                      </div>
+                    ) : (
+                      <div className="max-w-sm w-full">
+                        <p className="text-zinc-400 dark:text-zinc-500 text-sm mb-4">Try asking…</p>
+                        <div className="flex flex-col gap-2">
+                          {getSuggestedPrompts(conversation.contexts.map((c) => c.contextId)).map((prompt) => (
+                            <button
+                              key={prompt}
+                              type="button"
+                              onClick={() => setInput(prompt)}
+                              className="text-left rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:border-sky-300 dark:hover:border-sky-700 transition-colors"
+                            >
+                              {prompt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {conversation?.messages.map((m) => {
                   const isUser = m.role === "user";
                   const timeLabel = timeAgo(m.createdAt);
@@ -903,18 +1061,8 @@ export default function ChatPage() {
           )}
           {/* Bottom input bar: always visible */}
           <div className="shrink-0 p-3 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
-            {/* Avatar + message box row */}
-            <div className="flex items-stretch gap-3">
-              {currentPersona && (
-                <div className="h-[100px] w-[100px] rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 overflow-hidden flex items-center justify-center">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={personaAvatarSrc(currentPersona)}
-                    alt={currentPersona.displayName}
-                    className="h-full w-full object-cover"
-                  />
-                </div>
-              )}
+            {/* Message box: full width */}
+            <div className="relative">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -926,84 +1074,92 @@ export default function ChatPage() {
                 }}
                 placeholder="Message..."
                 rows={2}
-                className="flex-1 max-h-40 min-h-[3rem] rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-lg resize-y"
+                className="w-full max-h-40 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 pr-8 text-lg resize-y"
               />
+              {input && (
+                <button
+                  type="button"
+                  onClick={() => setInput("")}
+                  className="absolute top-1.5 right-1.5 w-8 h-8 flex items-center justify-center rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-300 text-xl font-medium"
+                  aria-label="Clear input"
+                >
+                  ×
+                </button>
+              )}
             </div>
 
-            {/* Model selector, Context preview, context count, Send */}
+            {/* Context status: count + preview link */}
+            <div className="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+              <span>
+                {conversation?.contexts.length
+                  ? `${conversation.contexts.length} context${conversation.contexts.length === 1 ? "" : "s"} selected`
+                  : "No contexts selected"}
+              </span>
+              <button
+                type="button"
+                onClick={openContextPreview}
+                disabled={!selectedId || contextPreviewLoading}
+                className="underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-50 disabled:no-underline"
+              >
+                {contextPreviewLoading ? "Loading context…" : "Context preview"}
+              </button>
+            </div>
+
+            {/* Model selector + Send */}
             <div className="flex items-center flex-wrap gap-2">
-              <div className="relative rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-sm min-w-[14rem]">
+              {currentPersona && (
                 <button
                   type="button"
-                  onClick={() => setShowPersonaMenu((open) => !open)}
-                  className="flex flex-col pr-3 py-1 text-left w-full"
-                  aria-haspopup="listbox"
-                  aria-expanded={showPersonaMenu}
+                  onClick={() => personaSelectRef.current?.showPicker?.() ?? personaSelectRef.current?.focus()}
+                  className="rounded-lg border border-zinc-300 dark:border-zinc-600 overflow-hidden shrink-0 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                  aria-label="Choose persona"
+                  title="Click to change persona"
                 >
-                  <div className="bg-transparent text-zinc-900 dark:text-zinc-50 text-base min-w-[8rem] py-0 pr-2 pl-2">
-                    {currentPersona
-                      ? `${currentPersona.displayName} (${friendlyCostTier(currentPersona.costTier)})`
-                      : "Select persona"}
-                  </div>
-                  {currentPersona && (
-                    <div className="mt-1 pb-0.5 pl-4 text-[11px] text-zinc-500 dark:text-zinc-400">
-                      {simpleModelName(currentPersona.modelString)} by {currentPersona.provider}
-                    </div>
+                  {currentPersona.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={currentPersona.avatarUrl}
+                      alt={currentPersona.displayName}
+                      className="h-20 w-20 object-cover"
+                    />
+                  ) : (
+                    <span className="inline-flex h-20 w-20 items-center justify-center bg-sky-100 dark:bg-sky-900 text-4xl">
+                      {PERSONA_AVATAR[currentPersona.name] ?? "🤖"}
+                    </span>
                   )}
                 </button>
-                {showPersonaMenu && (
-                  <div className="absolute z-40 left-0 right-0 bottom-full mb-1 max-h-64 overflow-auto rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg">
-                    <ul role="listbox" className="py-1">
-                      {personas.map((p) => {
-                        const selected = p.id === personaId;
-                        return (
-                          <li key={p.id}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPersonaId(p.id);
-                                setShowPersonaMenu(false);
-                              }}
-                              className={`w-full text-left px-3 py-2 text-sm ${
-                                selected
-                                  ? "bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-100"
-                                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-100"
-                              }`}
-                            >
-                              <div className="font-medium">
-                                {p.displayName} ({friendlyCostTier(p.costTier)})
-                              </div>
-                              <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                                {simpleModelName(p.modelString)} by {p.provider}
-                              </div>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-col items-start gap-0.5 shrink-0">
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {conversation?.contexts.length
-                    ? `${conversation.contexts.length} context${conversation.contexts.length === 1 ? "" : "s"} selected`
-                    : "No contexts selected"}
-                </span>
-                <button
-                  type="button"
-                  onClick={openContextPreview}
-                  disabled={!selectedId || contextPreviewLoading}
-                  className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-50 disabled:no-underline"
+              )}
+              <div className="flex flex-col gap-0.5 flex-1 sm:flex-none min-w-0">
+                <select
+                  ref={personaSelectRef}
+                  value={personaId}
+                  onChange={(e) => setPersonaId(e.target.value)}
+                  className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50 outline-none text-base w-full sm:w-48 px-2 py-1"
+                  aria-label="Persona"
                 >
-                  {contextPreviewLoading ? "Loading context…" : "Context preview"}
-                </button>
+                  {personas.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.displayName} ({p.costTier})
+                    </option>
+                  ))}
+                </select>
+                {currentPersona?.modelString && (
+                  <span className="text-sm text-zinc-400 dark:text-zinc-500 px-1">
+                    {currentPersona.modelString.split("/").pop()?.replace(/-/g, " ")}
+                    {currentPersona.provider ? ` · ${currentPersona.provider}` : ""}
+                  </span>
+                )}
+                {currentPersona?.description && (
+                  <span className="hidden sm:block text-xs text-zinc-400 dark:text-zinc-500 px-1 leading-snug max-w-[24rem]">
+                    {currentPersona.description}
+                  </span>
+                )}
               </div>
               <button
                 type="button"
                 onClick={sendMessage}
                 disabled={sending || !input.trim()}
-                className="ml-auto shrink-0 rounded-lg bg-sky-600 text-white px-4 py-2 text-base font-medium disabled:opacity-50"
+                className="basis-full sm:basis-auto sm:ml-auto shrink-0 rounded-lg bg-sky-600 text-white px-4 py-2 text-base font-medium disabled:opacity-50"
                 aria-label="Send"
               >
                 Send
@@ -1028,7 +1184,7 @@ export default function ChatPage() {
               }}
             />
             <div
-              className="fixed z-40 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg py-1 min-w-[140px]"
+              className="fixed z-40 rounded-lg border border-zinc-200 dark:border-zinc-600 bg-white dark:bg-zinc-950 shadow-xl py-1 w-max"
               style={{ bottom: menuPosition.bottom, right: menuPosition.right }}
             >
               {(() => {
@@ -1039,19 +1195,29 @@ export default function ChatPage() {
                     <button
                       type="button"
                       onClick={() => followUpLater(msg.id, msg.content)}
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                      className="block text-left px-3 py-2 text-sm whitespace-nowrap hover:bg-zinc-100 dark:hover:bg-zinc-800"
                     >
                       Follow up (branch)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { savePromptToQueue(msg.content); setMessageMenuId(null); }}
+                      className="block text-left px-3 py-2 text-sm whitespace-nowrap hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      Save to prompt queue
                     </button>
                     {msg.role === "assistant" && (
                       <button
                         type="button"
                         onClick={() => openWiskrCapture(msg.id, msg.content)}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                        className="block text-left px-3 py-2 text-sm whitespace-nowrap hover:bg-zinc-100 dark:hover:bg-zinc-800"
                       >
-                        Wiskr this (import doc)
+                        Add to my documents
                       </button>
                     )}
+                    <p className="px-3 py-2 text-xs text-zinc-400 dark:text-zinc-500 border-t border-zinc-100 dark:border-zinc-800 mt-1">
+                      Highlight text for more actions
+                    </p>
                   </>
                 );
               })()}
@@ -1074,9 +1240,20 @@ export default function ChatPage() {
               }}
             />
             <div
-              className="fixed z-40 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg py-1 min-w-[140px]"
+              className="fixed z-40 rounded-lg border border-zinc-200 dark:border-zinc-600 bg-white dark:bg-zinc-950 shadow-xl py-1 w-max"
               style={{ bottom: selectionMenu.bottom, right: selectionMenu.right }}
             >
+              <button
+                type="button"
+                onClick={() => {
+                  savePromptToQueue(selectionMenu.text);
+                  setSelectionMenu(null);
+                  window.getSelection()?.removeAllRanges();
+                }}
+                className="block text-left px-3 py-2 text-sm whitespace-nowrap hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              >
+                Save to prompt queue
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -1084,7 +1261,7 @@ export default function ChatPage() {
                   setSelectionMenu(null);
                   window.getSelection()?.removeAllRanges();
                 }}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                className="block text-left px-3 py-2 text-sm whitespace-nowrap hover:bg-zinc-100 dark:hover:bg-zinc-800"
               >
                 Follow up (branch)
               </button>
@@ -1096,9 +1273,9 @@ export default function ChatPage() {
                     setSelectionMenu(null);
                     window.getSelection()?.removeAllRanges();
                   }}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                  className="block text-left px-3 py-2 text-sm whitespace-nowrap hover:bg-zinc-100 dark:hover:bg-zinc-800"
                 >
-                  Wiskr this (import doc)
+                  Add to my documents
                 </button>
               )}
             </div>
@@ -1376,9 +1553,9 @@ export default function ChatPage() {
       {wiskrCaptureMessage && (
         <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl max-w-sm w-full p-4 flex flex-col gap-4">
-            <h2 className="font-semibold text-lg">Wiskr this response</h2>
+            <h2 className="font-semibold text-lg">Add to my documents</h2>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Add this AI response to a context so future conversations can use it.
+              Save this response as a document so future conversations can reference it.
             </p>
             <div>
               <label className="block text-sm font-medium mb-1">Context</label>
@@ -1418,37 +1595,65 @@ export default function ChatPage() {
       {/* Context preview modal */}
       {showContextPreview && (
         <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl max-w-xl w-full max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-zinc-200 dark:border-zinc-800">
-              <h2 className="font-semibold text-sm">Context preview</h2>
+          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-zinc-800">
+              <h2 className="font-semibold text-base">What the AI can see</h2>
               <button
                 type="button"
                 onClick={() => setShowContextPreview(false)}
-                className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                className="text-xl leading-none p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
                 aria-label="Close context preview"
               >
                 ×
               </button>
             </div>
-            <div className="p-4 flex-1 overflow-auto">
+            <div className="px-5 py-4 flex-1 overflow-auto flex flex-col gap-5">
               {contextPreviewLoading ? (
-                <p className="text-sm text-zinc-500">Loading context…</p>
+                <p className="text-base text-zinc-500">Loading context…</p>
               ) : contextPreviewError ? (
-                <p className="text-sm text-red-500">{contextPreviewError}</p>
+                <p className="text-base text-red-500">{contextPreviewError}</p>
               ) : contextPreviewText ? (
-                <pre className="whitespace-pre-wrap text-xs text-zinc-800 dark:text-zinc-100">
-                  {contextPreviewText}
-                </pre>
+                contextPreviewText
+                  .split(/\n(?=\[CONTEXT:)/)
+                  .map((block, i) => {
+                    const headerMatch = block.match(/^\[CONTEXT:\s*(.+?)\]/);
+                    const label = headerMatch?.[1] ?? null;
+                    const body = block.replace(/^\[CONTEXT:\s*.+?\]\n?/, "").trim();
+                    const lines = body.split("\n").filter(Boolean);
+                    return (
+                      <div key={i}>
+                        {label && (
+                          <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500 mb-2">
+                            {label}
+                          </h3>
+                        )}
+                        <ul className="flex flex-col gap-1.5">
+                          {lines.map((line, j) => (
+                            <li key={j} className="text-base text-zinc-800 dark:text-zinc-100 leading-snug pl-3 border-l-2 border-zinc-200 dark:border-zinc-700">
+                              {line.replace(/^[-•]\s*/, "")}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })
               ) : (
-                <p className="text-sm text-zinc-500">No context available for this conversation.</p>
+                <p className="text-base text-zinc-500">No context available for this conversation.</p>
               )}
             </div>
           </div>
         </div>
       )}
 
+      {/* Toast notification */}
+      {toast && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm px-4 py-2.5 rounded-full shadow-lg pointer-events-none">
+          {toast}
+        </div>
+      )}
+
       {/* Branch cards / branch conversations drawer (right) */}
-      {branchDrawerOpen && selectedId && (
+      {branchDrawerOpen && (selectedId || branchDrawerMode === "queue") && (
         <div className="fixed inset-0 z-20 flex justify-end">
           <div
             className="absolute inset-0 bg-black/30"
@@ -1462,8 +1667,19 @@ export default function ChatPage() {
                 <div className="inline-flex rounded-full border border-zinc-300 dark:border-zinc-700 text-xs overflow-hidden">
                   <button
                     type="button"
-                    onClick={() => setBranchDrawerMode("branches")}
+                    onClick={() => { setBranchDrawerMode("chats"); setPanelSearch(""); }}
                     className={`px-3 py-1 ${
+                      branchDrawerMode === "chats"
+                        ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
+                        : "bg-transparent text-zinc-600 dark:text-zinc-300"
+                    }`}
+                  >
+                    Chats
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setBranchDrawerMode("branches"); setPanelSearch(""); }}
+                    className={`px-3 py-1 border-l border-zinc-300 dark:border-zinc-700 ${
                       branchDrawerMode === "branches"
                         ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
                         : "bg-transparent text-zinc-600 dark:text-zinc-300"
@@ -1473,14 +1689,14 @@ export default function ChatPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setBranchDrawerMode("conversations")}
+                    onClick={() => { setBranchDrawerMode("queue"); setPanelSearch(""); loadSavedPrompts(); }}
                     className={`px-3 py-1 border-l border-zinc-300 dark:border-zinc-700 ${
-                      branchDrawerMode === "conversations"
+                      branchDrawerMode === "queue"
                         ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
                         : "bg-transparent text-zinc-600 dark:text-zinc-300"
                     }`}
                   >
-                    Conversations
+                    Queue{savedPrompts.length > 0 && ` (${savedPrompts.length})`}
                   </button>
                 </div>
               </div>
@@ -1493,74 +1709,101 @@ export default function ChatPage() {
                 ×
               </button>
             </div>
+            <div className="px-3 pt-3 pb-1">
+              <input
+                type="search"
+                value={panelSearch}
+                onChange={(e) => setPanelSearch(e.target.value)}
+                placeholder={branchDrawerMode === "chats" ? "Search chats…" : branchDrawerMode === "branches" ? "Search branches…" : "Search queue…"}
+                className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              />
+            </div>
             <ul className="flex-1 overflow-auto p-3 space-y-3">
-              {branchDrawerMode === "branches" ? (
-                branchCards.length === 0 ? (
-                  <li className="text-sm text-zinc-500 py-4">
-                    No branch cards. Use ⋯ on a message and choose “Follow up later”.
-                  </li>
-                ) : (
-                  branchCards.map((card) => (
-                    <li
-                      key={card.id}
-                      className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2"
-                    >
-                      <p className="text-sm line-clamp-2">
-                        {card.triggerText || card.sourceMessage?.content || "—"}
-                      </p>
-                      <div className="flex gap-2">
+              {branchDrawerMode === "chats" && <>
+                {(() => {
+                  const q = panelSearch.toLowerCase();
+                  const filtered = q ? conversations.filter((c) => (c.title ?? "Untitled").toLowerCase().includes(q)) : conversations;
+                  return filtered.length === 0
+                    ? <li className="text-sm text-zinc-500 py-4">{q ? "No chats match your search." : "No chats yet. Start a new conversation to see it here."}</li>
+                    : filtered.map((c) => (
+                      <li key={c.id} className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1">
                         <button
                           type="button"
-                          onClick={() => openBranchAsConversation(card)}
-                          disabled={!!openingCardId}
-                          className="text-sm rounded-lg bg-sky-600 text-white px-3 py-1.5 font-medium disabled:opacity-50"
+                          onClick={() => { setSelectedId(c.id); setBranchDrawerOpen(false); }}
+                          className={`w-full text-left text-sm font-medium hover:underline ${c.id === selectedId ? "text-sky-600 dark:text-sky-400" : ""}`}
                         >
-                          {openingCardId === card.id ? "…" : "Open"}
+                          {c.title ?? "Untitled"} ({c._count.messages})
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => dismissBranchCard(card.id)}
-                          disabled={!!dismissingCardId}
-                          className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5 disabled:opacity-50"
-                        >
-                          Dismiss
-                        </button>
-                      </div>
-                    </li>
-                  ))
-                )
-              ) : (() => {
-                const branchConversations = conversations.filter(
-                  (c) => c.parentConversation && c.parentConversation.id === selectedId
-                );
-                if (branchConversations.length === 0) {
-                  return (
-                    <li className="text-sm text-zinc-500 py-4">
-                      No branch conversations yet. Branches you open will appear here.
-                    </li>
-                  );
-                }
-                return branchConversations.map((c) => (
-                  <li
-                    key={c.id}
-                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedId(c.id);
-                        setBranchDrawerOpen(false);
-                      }}
-                      className="w-full text-left text-sm font-medium hover:underline"
-                    >
-                      {c.title ?? "Untitled"} ({c._count.messages})
-                    </button>
-                    <p className="text-xs text-zinc-500">
-                      Child of this conversation • Updated {timeAgo(c.updatedAt)}
-                    </p>
-                  </li>
-                ));
-              })()}
+                        <p className="text-xs text-zinc-500">Updated {timeAgo(c.updatedAt)}</p>
+                      </li>
+                    ));
+                })()}
+              </>}
+              {branchDrawerMode === "branches" && <>
+                {(() => {
+                  const q = panelSearch.toLowerCase();
+                  const filtered = q ? branchCards.filter((c) => (c.triggerText || c.sourceMessage?.content || "").toLowerCase().includes(q)) : branchCards;
+                  return filtered.length === 0
+                    ? <li className="text-sm text-zinc-500 py-4">{q ? "No branches match your search." : "No branch cards. Use ⋯ on a message and choose \"Follow up later\"."}</li>
+                    : filtered.map((card) => (
+                      <li key={card.id} className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
+                        <p className="text-sm line-clamp-2">{card.triggerText || card.sourceMessage?.content || "—"}</p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openBranchAsConversation(card)}
+                            disabled={!!openingCardId}
+                            className="text-sm rounded-lg bg-sky-600 text-white px-3 py-1.5 font-medium disabled:opacity-50"
+                          >
+                            {openingCardId === card.id ? "…" : "Open"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => dismissBranchCard(card.id)}
+                            disabled={!!dismissingCardId}
+                            className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5 disabled:opacity-50"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </li>
+                    ));
+                })()}
+              </>}
+              {branchDrawerMode === "queue" && <>
+                {(() => {
+                  const q = panelSearch.toLowerCase();
+                  const filtered = q ? savedPrompts.filter((p) => p.content.toLowerCase().includes(q)) : savedPrompts;
+                  return filtered.length === 0
+                    ? <li className="text-sm text-zinc-500 py-4">{q ? "No prompts match your search." : "No saved prompts yet. Highlight any text in a message and choose \"Save to prompt queue\"."}</li>
+                    : filtered.map((p) => (
+                      <li key={p.id} className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
+                        <p className="text-sm">{p.content}</p>
+                        {p.sourceConversation && (
+                          <p className="text-xs text-zinc-400 dark:text-zinc-500 truncate">
+                            From: {p.sourceConversation.title ?? "Untitled"}
+                          </p>
+                        )}
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => { setInput(p.content); setBranchDrawerOpen(false); }}
+                            className="text-sm rounded-lg bg-sky-600 text-white px-3 py-1.5 font-medium"
+                          >
+                            Use
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteSavedPrompt(p.id)}
+                            className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </li>
+                    ));
+                })()}
+              </>}
             </ul>
           </div>
         </div>

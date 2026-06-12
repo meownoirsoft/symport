@@ -3,6 +3,13 @@ import { prisma } from "@/lib/db";
 import { hash } from "bcryptjs";
 
 export async function POST(request: Request) {
+  if (process.env.ALLOW_REGISTRATION !== "true") {
+    return NextResponse.json(
+      { error: "Registration is not open" },
+      { status: 403 }
+    );
+  }
+
   const body = await request.json().catch(() => ({}));
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   const password = typeof body.password === "string" ? body.password : "";

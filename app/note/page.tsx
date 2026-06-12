@@ -1,14 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 export default function AddNotePage() {
   const router = useRouter();
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState(false);
+
+  const renderedHtml = useMemo(() => {
+    if (!preview || !text.trim()) return "";
+    return DOMPurify.sanitize(marked(text) as string);
+  }, [preview, text]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -40,21 +48,49 @@ export default function AddNotePage() {
         <Link href="/" className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
           ← Back
         </Link>
-        <h1 className="text-xl font-semibold">Add note</h1>
+        <h1 className="text-xl font-semibold flex-1">Add note</h1>
+        {text.trim() && (
+          <div className="inline-flex rounded-lg border border-zinc-300 dark:border-zinc-600 overflow-hidden text-sm">
+            <button
+              type="button"
+              onClick={() => setPreview(false)}
+              className={`px-3 py-1.5 ${!preview ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-medium" : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => setPreview(true)}
+              className={`px-3 py-1.5 border-l border-zinc-300 dark:border-zinc-600 ${preview ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-medium" : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+            >
+              Preview
+            </button>
+          </div>
+        )}
       </header>
       <main className="max-w-2xl mx-auto px-4 py-4">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
-          Type or paste your note. It will be processed by AI for title, type, tags, and structured data—same as captured documents.
-        </p>
+        {!preview && (
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
+            Type or paste your note. Markdown is supported. It will be processed by AI for title, type, tags, and structured data.
+          </p>
+        )}
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Paste or type document text…"
-            rows={14}
-            className="w-full rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-3 text-base resize-y min-h-[280px]"
-            disabled={saving}
-          />
+          {preview ? (
+            <div
+              className="w-full rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-3 min-h-[280px] prose prose-zinc dark:prose-invert max-w-none text-base"
+              dangerouslySetInnerHTML={{ __html: renderedHtml }}
+            />
+          ) : (
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Paste or type document text… Markdown supported."
+              rows={14}
+              className="w-full rounded-xl border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-4 py-3 text-base resize-y min-h-[280px] font-mono text-sm"
+              disabled={saving}
+              autoFocus
+            />
+          )}
           {error && (
             <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
           )}

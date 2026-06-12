@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { readFileSync, existsSync } from "fs";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { getUploadPath } from "@/lib/uploads";
+import { downloadFile } from "@/lib/bunny";
 import { extractFromImageBuffer, extractFromText, buildSearchText, normalizeTags, type ExtractedDoc } from "@/lib/extract";
 import { updateDocumentEmbedding } from "@/lib/embeddings";
 import type { Prisma } from "@prisma/client";
@@ -10,8 +11,14 @@ export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
+
   const { id } = await params;
-  const doc = await prisma.document.findUnique({ where: { id } });
+  const doc = await prisma.document.findUnique({ where: { id, userId } });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (!process.env.OPENAI_API_KEY) {
@@ -32,11 +39,12 @@ export async function POST(
       );
     }
   } else if (doc.imagePath) {
-    const fullPath = getUploadPath(doc.imagePath);
-    if (!existsSync(fullPath)) {
+    let buffer: Buffer;
+    try {
+      buffer = await downloadFile(doc.imagePath);
+    } catch {
       return NextResponse.json({ error: "Image file not found" }, { status: 404 });
     }
-    const buffer = readFileSync(fullPath);
     try {
       const extracted = await extractFromImageBuffer(buffer, { userFeedback });
       extractedData = extracted as Record<string, unknown>;
@@ -54,15 +62,16 @@ export async function POST(
   const tags = normalizeTags(extractedData.tags);
 
   await prisma.document.update({
-    where: { id },
+    where: { id, userId },
     data: {
       extractedData: extractedData as Prisma.InputJsonValue,
       searchText: searchText || null,
       tags,
+      status: "done",
     },
   });
   await updateDocumentEmbedding(prisma, id, searchText || undefined);
 
-  const updated = await prisma.document.findUnique({ where: { id } });
+  const updated = await prisma.document.findUnique({ where: { id, userId } });
   return NextResponse.json(updated);
 }

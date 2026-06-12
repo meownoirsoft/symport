@@ -7,12 +7,25 @@ type Mapping = {
   categories: string[];
   tagsByCategory: Record<string, string[]>;
   overrides: Record<string, string | null>;
+  categoryNotes: Record<string, string>;
+};
+
+type TagSuggestion = {
+  tag: string;
+  count: number;
+  coTags: { tag: string; count: number }[];
 };
 
 export default function ManageCategoriesPage() {
   const [mapping, setMapping] = useState<Mapping | null>(null);
+  const [catCounts, setCatCounts] = useState<Record<string, number>>({});
+  const [tagCounts, setTagCounts] = useState<Record<string, number>>({});
+  const [suggestions, setSuggestions] = useState<TagSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [dragTag, setDragTag] = useState<string | null>(null);
+  const [dragOverCat, setDragOverCat] = useState<string | null>(null);
+  const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
   const [addTag, setAddTag] = useState({ tag: "", category: "" });
   const [newCategoryName, setNewCategoryName] = useState("");
   const [renameState, setRenameState] = useState<{ category: string; value: string } | null>(null);
@@ -21,11 +34,20 @@ export default function ManageCategoriesPage() {
 
   function fetchMapping() {
     setLoading(true);
-    fetch("/api/settings/category-mapping")
-      .then((r) => r.json())
-      .then((data: Mapping) => {
-        setMapping(data);
-        if (data.categories.length && !addTag.category) setAddTag((a) => ({ ...a, category: data.categories[0] }));
+    Promise.all([
+      fetch("/api/settings/category-mapping").then((r) => r.json()),
+      fetch("/api/documents/categories").then((r) => r.json()),
+      fetch("/api/settings/suggested-categories").then((r) => r.ok ? r.json() : { suggestions: [] }),
+    ])
+      .then(([mappingData, countsData, suggestionsData]: [Mapping, { categories: { name: string; count: number }[]; tagCounts: Record<string, number> }, { suggestions: TagSuggestion[] }]) => {
+        setMapping(mappingData);
+        setNotesDraft(mappingData.categoryNotes ?? {});
+        if (mappingData.categories.length && !addTag.category) setAddTag((a) => ({ ...a, category: mappingData.categories[0] }));
+        const cc: Record<string, number> = {};
+        for (const c of countsData.categories ?? []) cc[c.name] = c.count;
+        setCatCounts(cc);
+        setTagCounts(countsData.tagCounts ?? {});
+        setSuggestions(suggestionsData.suggestions ?? []);
       })
       .catch(() => setError("Failed to load"))
       .finally(() => setLoading(false));
@@ -134,6 +156,38 @@ export default function ManageCategoriesPage() {
     }
   }
 
+  async function dropTagOnCategory(tag: string, targetCategory: string) {
+    setDragTag(null);
+    setDragOverCat(null);
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/settings/category-mapping", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag, category: targetCategory }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      fetchMapping();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveCategoryNote(category: string, note: string) {
+    try {
+      await fetch("/api/settings/category-mapping", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ setCategoryNote: { category, note } }),
+      });
+    } catch {
+      // non-blocking; user can retry by blurring again
+    }
+  }
+
   if (loading || !mapping) {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
@@ -154,10 +208,16 @@ export default function ManageCategoriesPage() {
           ← Back to documents
         </Link>
         <h1 className="text-xl font-semibold">Manage categories</h1>
+        <Link href="/chat" className="ml-auto text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+          Go to Chat →
+        </Link>
       </header>
       <main className="max-w-lg mx-auto px-4 py-4 flex flex-col gap-6">
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
           Categories group tags on the documents page. Documents appear in a category when they have at least one tag that maps to it. Tags removed from a category go to Other.
+        </p>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500">
+          Tip: drag any tag and drop it onto a different category to move it.
         </p>
 
         {error && (
@@ -220,9 +280,49 @@ export default function ManageCategoriesPage() {
           </button>
         </div>
 
+        {suggestions.length > 0 && (
+          <section className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4">
+            <h2 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-1">
+              Suggested: uncategorized tags
+            </h2>
+            <p className="text-xs text-amber-700 dark:text-amber-400 mb-3">
+              These tags appear on multiple documents but aren&apos;t mapped to any category. Assign them to a category or create a new one.
+            </p>
+            <ul className="flex flex-wrap gap-2">
+              {suggestions.slice(0, 20).map((s) => (
+                <li key={s.tag} className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setAddTag({ tag: s.tag, category: mapping.categories[0] ?? "" })}
+                    className="inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200 px-2 py-1 text-xs hover:bg-amber-200 dark:hover:bg-amber-800 transition-colors"
+                    title={s.coTags.length > 0 ? `Often with: ${s.coTags.map((c) => c.tag).join(", ")}` : undefined}
+                  >
+                    {s.tag}
+                    <span className="text-amber-500 dark:text-amber-400 text-[10px]">({s.count})</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         <div className="flex flex-col gap-4">
           {mapping.categories.map((cat) => (
-            <section key={cat} className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4">
+            <section
+              key={cat}
+              className={`rounded-xl border p-4 transition-colors ${
+                dragOverCat === cat
+                  ? "border-sky-400 bg-sky-50 dark:bg-sky-950/30"
+                  : "border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900"
+              }`}
+              onDragOver={(e) => { e.preventDefault(); setDragOverCat(cat); }}
+              onDragLeave={() => setDragOverCat(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                const tag = e.dataTransfer.getData("text/plain");
+                if (tag && tag !== "" && dragTag) dropTagOnCategory(tag, cat);
+              }}
+            >
               <div className="flex flex-wrap items-center gap-2 mb-2">
                 {renameState?.category === cat ? (
                   <>
@@ -251,7 +351,14 @@ export default function ManageCategoriesPage() {
                   </>
                 ) : (
                   <>
-                    <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">{cat}</h2>
+                    <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                      {cat}
+                      {catCounts[cat] != null && (
+                        <span className="ml-1.5 text-xs font-normal text-zinc-400 dark:text-zinc-500">
+                          {catCounts[cat]} docs
+                        </span>
+                      )}
+                    </h2>
                     {cat !== "Other" && (
                       <>
                         <button
@@ -300,9 +407,17 @@ export default function ManageCategoriesPage() {
                 {(mapping.tagsByCategory[cat] ?? []).map((tag) => (
                   <li
                     key={tag}
-                    className="inline-flex items-center gap-1 rounded-md bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200 px-2 py-1 text-xs"
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData("text/plain", tag); setDragTag(tag); }}
+                    onDragEnd={() => { setDragTag(null); setDragOverCat(null); }}
+                    className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs cursor-grab active:cursor-grabbing transition-opacity ${
+                      dragTag === tag ? "opacity-40" : ""
+                    } bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200`}
                   >
                     {tag}
+                    {tagCounts[tag] != null && (
+                      <span className="text-zinc-400 dark:text-zinc-500">({tagCounts[tag]})</span>
+                    )}
                     <button
                       type="button"
                       onClick={() => removeTagFromCategory(tag)}
@@ -315,9 +430,19 @@ export default function ManageCategoriesPage() {
                   </li>
                 ))}
                 {(mapping.tagsByCategory[cat] ?? []).length === 0 && (
-                  <li className="text-xs text-zinc-500">No tags</li>
+                  <li className="text-xs text-zinc-500 italic">
+                    {dragOverCat === cat ? "Drop here" : "No tags — drag one here"}
+                  </li>
                 )}
               </ul>
+              <textarea
+                rows={2}
+                placeholder="Notes about this category (saved automatically when you click away)…"
+                value={notesDraft[cat] ?? ""}
+                onChange={(e) => setNotesDraft((d) => ({ ...d, [cat]: e.target.value }))}
+                onBlur={() => saveCategoryNote(cat, notesDraft[cat] ?? "")}
+                className="mt-3 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400 resize-none focus:outline-none focus:ring-1 focus:ring-sky-400"
+              />
             </section>
           ))}
         </div>

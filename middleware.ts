@@ -19,6 +19,9 @@ export const config = {
     "/settings/:path*",
     "/api/documents/:path*",
     "/api/wiskr/:path*",
+    "/api/admin/:path*",
+    "/api/settings/:path*",
+    "/api/saved-prompts/:path*",
   ],
 };
 

@@ -3,34 +3,48 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:prod": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:seed": "npx tsx prisma/seed.ts",
-    "docker:up": "docker compose up -d"
+    "docker:up": "docker compose up -d",
+    "test": "vitest run"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",
+    "@sentry/nextjs": "^10.53.1",
+    "@tailwindcss/typography": "^0.5.19",
+    "@types/dompurify": "^3.0.5",
+    "@types/pdf-parse": "^1.1.5",
     "bcryptjs": "^3.0.3",
     "cropperjs": "^2.1.0",
+    "dompurify": "^3.4.5",
     "dotenv": "^17.3.1",
+    "lightningcss-linux-x64-gnu": "^1.32.0",
+    "marked": "^18.0.2",
     "next": "16.1.6",
     "next-auth": "^4.24.13",
     "openai": "^6.25.0",
+    "pdf-parse": "^2.4.5",
     "prisma": "^6.19.2",
     "react": "19.2.3",
     "react-cropper": "^2.3.3",
     "react-dom": "19.2.3",
+    "recharts": "^3.8.1",
+    "resend": "^6.12.3",
     "sharp": "^0.34.5"
   },
   "devDependencies": {
+    "@netlify/plugin-nextjs": "^5.15.11",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -39,6 +53,7 @@
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
     "tsx": "^4.19.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^2.1.9"
   }
 }

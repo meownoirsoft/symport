@@ -8,6 +8,7 @@ node_modules
 out
 build
 dist
+.netlify
 
 # Env
 .env
@@ -24,12 +25,17 @@ yarn-error.log*
 # IDE
 .idea
 .vscode
+.claude
 *.swp
 *.swo
 
 # OS
 .DS_Store
 Thumbs.db
+*:Zone.Identifier
+
+# TypeScript
+*.tsbuildinfo
 
 # Uploaded images (sensitive)
 uploads/

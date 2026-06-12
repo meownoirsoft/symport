@@ -1,0 +1,12 @@
+[build]
+  command    = "npm run build"
+  publish    = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  node_bundler = "nft"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
