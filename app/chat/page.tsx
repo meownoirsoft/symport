@@ -10,6 +10,8 @@ type Persona = {
   name: string;
   displayName: string;
   costTier: string;
+  provider: string;
+  modelString: string;
   avatarUrl?: string | null;
 };
 type Conversation = {
@@ -55,6 +57,52 @@ const PERSONA_AVATAR: Record<string, string> = {
   Dash: "🚀",
   Opal: "🕊️",
 };
+
+function friendlyCostTier(tier: string): string {
+  switch (tier) {
+    case "cheap":
+      return "Budget";
+    case "mid":
+      return "Standard";
+    case "expensive":
+      return "Premium";
+    default:
+      return tier;
+  }
+}
+
+function simpleModelName(modelString: string): string {
+  const last = modelString.split("/").pop() ?? modelString;
+  return last.replace(/[-_]/g, " ");
+}
+
+function personaAvatarSrc(p: Persona): string {
+  // Use a local 100x100 asset with lowercased name, e.g. prism100.png
+  return `/avatars/${p.name.toLowerCase()}100.png`;
+}
+
+function sortPersonasForDisplay(list: Persona[]): Persona[] {
+  const weight = (tier: string): number => {
+    switch (tier) {
+      case "cheap":
+        return 0; // Budget
+      case "mid":
+        return 1; // Standard
+      case "expensive":
+        return 2; // Premium
+      default:
+        return 3;
+    }
+  };
+  return [...list].sort((a, b) => {
+    const wa = weight(a.costTier);
+    const wb = weight(b.costTier);
+    if (wa !== wb) return wa - wb;
+    const an = a.displayName || a.name;
+    const bn = b.displayName || b.name;
+    return an.localeCompare(bn);
+  });
+}
 
 export default function ChatPage() {
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -111,6 +159,8 @@ export default function ChatPage() {
   const [contextPreviewError, setContextPreviewError] = useState<string | null>(null);
   const [branchDrawerMode, setBranchDrawerMode] = useState<"branches" | "conversations">("branches");
   const [contextChangedSuggestNewConversation, setContextChangedSuggestNewConversation] = useState(false);
+  const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
+  const [showPersonaMenu, setShowPersonaMenu] = useState(false);
 
   /** True when at least one previously selected context was removed (not when only adding). */
   const contextSetHadRemoval = useCallback(
@@ -124,11 +174,15 @@ export default function ChatPage() {
   const loadPersonas = useCallback(async () => {
     const res = await fetch("/api/wiskr/personas");
     if (res.ok) {
-      const data = await res.json();
+      const raw = (await res.json()) as Persona[];
+      const data = sortPersonasForDisplay(raw);
       setPersonas(data);
-      if (data.length && !personaId) setPersonaId(data.find((p: Persona) => p.name === "Prism")?.id ?? data[0].id);
+      if (data.length && !personaId) {
+        setPersonaId(data.find((p) => p.name === "Prism")?.id ?? data[0].id);
+      }
     }
   }, [personaId]);
+
   const loadConversations = useCallback(async () => {
     const res = await fetch("/api/wiskr/conversations");
     if (!res.ok) return;
@@ -144,6 +198,31 @@ export default function ChatPage() {
     }
     setSelectedId((prev) => (prev ?? (data[0]?.id ?? null)));
   }, []);
+
+  const deleteConversation = useCallback(
+    async (id: string) => {
+      if (!window.confirm("Delete this conversation? This cannot be undone.")) return;
+      setDeletingConversationId(id);
+      try {
+        const res = await fetch(`/api/wiskr/conversations/${id}`, {
+          method: "DELETE",
+        });
+        if (res.ok) {
+          await loadConversations();
+          setConversation((prev) => (prev && prev.id === id ? null : prev));
+          if (selectedId === id) {
+            setSelectedId(null);
+          }
+        } else {
+          const err = await res.json().catch(() => ({}));
+          alert(err?.error ?? "Failed to delete conversation");
+        }
+      } finally {
+        setDeletingConversationId(null);
+      }
+    },
+    [loadConversations, selectedId]
+  );
   const loadCategories = useCallback(async () => {
     const res = await fetch("/api/documents/categories");
     if (res.ok) setCategories((await res.json()).categories ?? []);
@@ -375,7 +454,7 @@ export default function ChatPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: conversation.title ? `${conversation.title} (continued)` : "New conversation",
+          title: "New conversation",
           contextIds: conversation.contexts.map((c) => c.contextId),
         }),
       });
@@ -496,28 +575,47 @@ export default function ChatPage() {
 
   const sendMessage = async () => {
     const text = input.trim();
-    if (!text || !selectedId) return;
+    if (!text || sending) return;
     setSending(true);
     setInput("");
+
+    let convId = selectedId;
+    if (!convId) {
+      try {
+        const res = await fetch("/api/wiskr/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: "New conversation", contextIds: [] }),
+        });
+        if (!res.ok) {
+          setInput(text);
+          setSending(false);
+          return;
+        }
+        const conv = await res.json();
+        convId = conv.id;
+        setSelectedId(conv.id);
+        loadConversations();
+      } catch {
+        setInput(text);
+        setSending(false);
+        return;
+      }
+    }
+
     try {
-      const res = await fetch(`/api/wiskr/conversations/${selectedId}/messages`, {
+      const res = await fetch(`/api/wiskr/conversations/${convId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: text, personaId: personaId || undefined }),
       });
       if (res.ok) {
         const { assistantMessage } = await res.json();
+        const userMsg = { id: `user-${Date.now()}`, role: "user", content: text, createdAt: new Date().toISOString() };
         setConversation((prev) =>
           prev
-            ? {
-                ...prev,
-                messages: [
-                  ...prev.messages,
-                  { id: "user", role: "user", content: text, createdAt: new Date().toISOString() },
-                  assistantMessage,
-                ],
-              }
-            : null
+            ? { ...prev, messages: [...prev.messages, userMsg, assistantMessage] }
+            : { id: convId!, title: "New conversation", messages: [userMsg, assistantMessage], contexts: [] }
         );
       } else {
         const err = await res.json().catch(() => ({}));
@@ -694,8 +792,8 @@ export default function ChatPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <main className="flex-1 flex flex-col min-h-0">
           {!selectedId ? (
-            <div className="flex-1 flex items-center justify-center p-6 text-zinc-500">
-              Select a conversation or create one.
+            <div className="flex-1 flex items-center justify-center p-6 text-zinc-400 text-sm">
+              Type a message below to start a new chat.
             </div>
           ) : (
             <>
@@ -801,83 +899,117 @@ export default function ChatPage() {
                 })}
                 <div ref={messagesEndRef} />
               </div>
-              {/* Bottom input bar: message box full width, then model + send row */}
-              <div className="shrink-0 p-3 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
-                {/* Message box: full width */}
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      sendMessage();
-                    }
-                  }}
-                  placeholder="Message..."
-                  rows={2}
-                  className="w-full max-h-40 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-lg resize-y"
-                />
-
-                {/* Model selector, Context preview, context count, Send */}
-                <div className="flex items-center flex-wrap gap-2">
-                  <div className="flex items-center gap-2 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 overflow-hidden text-sm">
-                    {currentPersona && (
-                      <>
-                        {currentPersona.avatarUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={currentPersona.avatarUrl}
-                            alt={currentPersona.displayName}
-                            className="h-10 w-10 object-cover"
-                          />
-                        ) : (
-                          <span className="inline-flex h-10 w-10 items-center justify-center bg-sky-100 dark:bg-sky-900 text-lg">
-                            {PERSONA_AVATAR[currentPersona.name] ?? "🤖"}
-                          </span>
-                        )}
-                      </>
-                    )}
-                    <select
-                      value={personaId}
-                      onChange={(e) => setPersonaId(e.target.value)}
-                      className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50 border-none outline-none text-base min-w-[8rem] py-1 pr-2"
-                      aria-label="Persona"
-                    >
-                      {personas.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.displayName} ({p.costTier})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex flex-col items-start gap-0.5 shrink-0">
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      {conversation?.contexts.length
-                        ? `${conversation.contexts.length} context${conversation.contexts.length === 1 ? "" : "s"} selected`
-                        : "No contexts selected"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={openContextPreview}
-                      disabled={!selectedId || contextPreviewLoading}
-                      className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-50 disabled:no-underline"
-                    >
-                      {contextPreviewLoading ? "Loading context…" : "Context preview"}
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={sendMessage}
-                    disabled={sending || !input.trim()}
-                    className="ml-auto shrink-0 rounded-lg bg-sky-600 text-white px-4 py-2 text-base font-medium disabled:opacity-50"
-                    aria-label="Send"
-                  >
-                    Send
-                  </button>
-                </div>
-              </div>
             </>
           )}
+          {/* Bottom input bar: always visible */}
+          <div className="shrink-0 p-3 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
+            {/* Avatar + message box row */}
+            <div className="flex items-stretch gap-3">
+              {currentPersona && (
+                <div className="h-[100px] w-[100px] rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 overflow-hidden flex items-center justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={personaAvatarSrc(currentPersona)}
+                    alt={currentPersona.displayName}
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+              )}
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                  }
+                }}
+                placeholder="Message..."
+                rows={2}
+                className="flex-1 max-h-40 min-h-[3rem] rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-lg resize-y"
+              />
+            </div>
+
+            {/* Model selector, Context preview, context count, Send */}
+            <div className="flex items-center flex-wrap gap-2">
+              <div className="relative rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-sm min-w-[14rem]">
+                <button
+                  type="button"
+                  onClick={() => setShowPersonaMenu((open) => !open)}
+                  className="flex flex-col pr-3 py-1 text-left w-full"
+                  aria-haspopup="listbox"
+                  aria-expanded={showPersonaMenu}
+                >
+                  <div className="bg-transparent text-zinc-900 dark:text-zinc-50 text-base min-w-[8rem] py-0 pr-2 pl-2">
+                    {currentPersona
+                      ? `${currentPersona.displayName} (${friendlyCostTier(currentPersona.costTier)})`
+                      : "Select persona"}
+                  </div>
+                  {currentPersona && (
+                    <div className="mt-1 pb-0.5 pl-4 text-[11px] text-zinc-500 dark:text-zinc-400">
+                      {simpleModelName(currentPersona.modelString)} by {currentPersona.provider}
+                    </div>
+                  )}
+                </button>
+                {showPersonaMenu && (
+                  <div className="absolute z-40 left-0 right-0 bottom-full mb-1 max-h-64 overflow-auto rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg">
+                    <ul role="listbox" className="py-1">
+                      {personas.map((p) => {
+                        const selected = p.id === personaId;
+                        return (
+                          <li key={p.id}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPersonaId(p.id);
+                                setShowPersonaMenu(false);
+                              }}
+                              className={`w-full text-left px-3 py-2 text-sm ${
+                                selected
+                                  ? "bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-100"
+                                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-100"
+                              }`}
+                            >
+                              <div className="font-medium">
+                                {p.displayName} ({friendlyCostTier(p.costTier)})
+                              </div>
+                              <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                {simpleModelName(p.modelString)} by {p.provider}
+                              </div>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col items-start gap-0.5 shrink-0">
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {conversation?.contexts.length
+                    ? `${conversation.contexts.length} context${conversation.contexts.length === 1 ? "" : "s"} selected`
+                    : "No contexts selected"}
+                </span>
+                <button
+                  type="button"
+                  onClick={openContextPreview}
+                  disabled={!selectedId || contextPreviewLoading}
+                  className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-50 disabled:no-underline"
+                >
+                  {contextPreviewLoading ? "Loading context…" : "Context preview"}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={sendMessage}
+                disabled={sending || !input.trim()}
+                className="ml-auto shrink-0 rounded-lg bg-sky-600 text-white px-4 py-2 text-base font-medium disabled:opacity-50"
+                aria-label="Send"
+              >
+                Send
+              </button>
+            </div>
+          </div>
         </main>
       </div>
 
@@ -1109,14 +1241,14 @@ export default function ChatPage() {
             </div>
             <ul className="flex-1 overflow-auto p-3 space-y-1">
               {conversations.map((c) => (
-                <li key={c.id}>
+                <li key={c.id} className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => {
                       setSelectedId(c.id);
                       setShowConversationsPanel(false);
                     }}
-                    className={`w-full text-left rounded-lg py-2 px-3 text-sm truncate ${
+                    className={`flex-1 text-left rounded-lg py-2 px-3 text-sm truncate ${
                       selectedId === c.id
                         ? "bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-200"
                         : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -1126,6 +1258,15 @@ export default function ChatPage() {
                       <span className="text-zinc-400 dark:text-zinc-500 mr-1">↳ </span>
                     )}
                     {c.title ?? "Untitled"} ({c._count.messages})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteConversation(c.id)}
+                    disabled={!!deletingConversationId}
+                    className="shrink-0 p-1.5 rounded-lg text-xs text-zinc-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/40"
+                    aria-label="Delete conversation"
+                  >
+                    🗑
                   </button>
                 </li>
               ))}
