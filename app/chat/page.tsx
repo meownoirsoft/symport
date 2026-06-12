@@ -10,11 +10,9 @@ type Persona = {
   name: string;
   displayName: string;
   costTier: string;
-  provider: string;
-  modelString: string;
-  avatarUrl?: string | null;
   provider?: string | null;
   modelString?: string | null;
+  avatarUrl?: string | null;
   description?: string | null;
 };
 type Conversation = {
