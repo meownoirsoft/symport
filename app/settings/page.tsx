@@ -13,6 +13,18 @@ export default function SettingsPage() {
         <ul className="space-y-2">
           <li>
             <Link
+              href="/settings/api-keys"
+              className="flex items-center justify-between rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+            >
+              <div>
+                <span className="font-medium">API Keys</span>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Connect OpenRouter, OpenAI, or Anthropic to enable chat</p>
+              </div>
+              <span className="text-zinc-400">→</span>
+            </Link>
+          </li>
+          <li>
+            <Link
               href="/settings/categories"
               className="flex items-center justify-between rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800"
             >

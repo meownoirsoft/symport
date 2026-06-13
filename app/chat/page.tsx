@@ -748,7 +748,12 @@ export default function ChatPage() {
       } else {
         const err = await res.json().catch(() => ({}));
         setInput(text);
-        alert(err?.error ?? "Failed to send");
+        if (res.status === 402 || err?.error === "NO_API_KEY") {
+          alert("To start chatting, add an API key in Settings → API Keys.");
+          window.location.href = "/settings/api-keys";
+        } else {
+          alert(err?.error ?? "Failed to send");
+        }
       }
     } finally {
       setSending(false);

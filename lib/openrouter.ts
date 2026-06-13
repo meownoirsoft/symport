@@ -12,6 +12,7 @@ export interface OpenRouterChatOptions {
   messages: OpenRouterMessage[];
   max_tokens?: number;
   temperature?: number;
+  apiKey?: string;
 }
 
 export interface OpenRouterChatResponse {
@@ -31,7 +32,7 @@ export interface OpenRouterChatResponse {
 export async function openRouterChat(
   options: OpenRouterChatOptions
 ): Promise<OpenRouterChatResponse> {
-  const key = process.env.OPENROUTER_API_KEY;
+  const key = options.apiKey ?? process.env.OPENROUTER_API_KEY;
   if (!key?.trim()) {
     throw new Error("OPENROUTER_API_KEY is not set");
   }

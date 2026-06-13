@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { openRouterChat, type OpenRouterMessage } from "@/lib/openrouter";
+import { aiChat, NoApiKeyError, type ChatMessage, type UserKeys } from "@/lib/ai-chat";
 import { buildContextPackageForConversation } from "@/lib/context-assembly";
 import { getModelCapability } from "@/lib/model-capabilities";
+import { decrypt } from "@/lib/encrypt";
 
 function autoTitle(content: string): string {
   const words = content.trim().split(/\s+/);
@@ -45,6 +46,18 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const userId = session.user.id;
+
+  const keyRows = await prisma.userApiKey.findMany({ where: { userId } });
+  if (keyRows.length === 0) {
+    return NextResponse.json(
+      { error: "NO_API_KEY", message: "Add an API key in Settings to start chatting." },
+      { status: 402 }
+    );
+  }
+  const userKeys: UserKeys = {};
+  for (const row of keyRows) {
+    userKeys[row.provider as keyof UserKeys] = decrypt(row.encryptedKey);
+  }
 
   const { id: conversationId } = await params;
   const body = await request.json().catch(() => ({}));
@@ -99,11 +112,11 @@ export async function POST(
     for (const id of currentSet) if (!msgSet.has(id)) return false;
     return true;
   });
-  const history: OpenRouterMessage[] = sameContextMessages.map((m) => ({
+  const history: ChatMessage[] = sameContextMessages.map((m) => ({
     role: m.role as "user" | "assistant" | "system",
     content: m.content,
   }));
-  const messagesForApi: OpenRouterMessage[] = [
+  const messagesForApi: ChatMessage[] = [
     { role: "system", content: systemContent },
     ...history,
     { role: "user", content },
@@ -112,14 +125,21 @@ export async function POST(
   let assistantContent: string;
   const capability = getModelCapability(persona.modelString);
   try {
-    const response = await openRouterChat({
+    assistantContent = await aiChat({
       model: persona.modelString,
+      provider: persona.provider,
       messages: messagesForApi,
       max_tokens: capability.maxOutputTokens,
+      userKeys,
     });
-    assistantContent = response.choices?.[0]?.message?.content?.trim() ?? "No response generated.";
   } catch (err) {
-    const message = err instanceof Error ? err.message : "OpenRouter request failed";
+    if (err instanceof NoApiKeyError) {
+      return NextResponse.json(
+        { error: "NO_API_KEY", message: "Add an API key in Settings to start chatting." },
+        { status: 402 }
+      );
+    }
+    const message = err instanceof Error ? err.message : "AI request failed";
     return NextResponse.json({ error: message }, { status: 502 });
   }
 

@@ -18,6 +18,18 @@ model User {
   documents     Document[]
   conversations Conversation[]
   savedPrompts  SavedPrompt[]
+  apiKeys       UserApiKey[]
+}
+
+model UserApiKey {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider     String   // "openrouter" | "openai" | "anthropic"
+  encryptedKey String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@unique([userId, provider])
 }
 
 model Document {
