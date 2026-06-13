@@ -238,6 +238,7 @@ export default function ChatPage() {
   const [contextChangedSuggestNewConversation, setContextChangedSuggestNewConversation] = useState(false);
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
   const [showPersonaMenu, setShowPersonaMenu] = useState(false);
+  const [hasApiKeys, setHasApiKeys] = useState<boolean | null>(null);
 
   /** True when at least one previously selected context was removed (not when only adding). */
   const contextSetHadRemoval = useCallback(
@@ -354,6 +355,10 @@ export default function ChatPage() {
     loadConversations();
     loadCategories();
     loadSavedPrompts();
+    fetch("/api/settings/api-keys")
+      .then((r) => r.json())
+      .then((data) => setHasApiKeys(Object.values(data).some(Boolean)))
+      .catch(() => setHasApiKeys(null));
   }, [loadPersonas, loadConversations, loadCategories, loadSavedPrompts]);
 
   // Persist selected conversation so it survives navigation away and back.
@@ -749,8 +754,7 @@ export default function ChatPage() {
         const err = await res.json().catch(() => ({}));
         setInput(text);
         if (res.status === 402 || err?.error === "NO_API_KEY") {
-          alert("To start chatting, add an API key in Settings → API Keys.");
-          window.location.href = "/settings/api-keys";
+          setHasApiKeys(false);
         } else {
           alert(err?.error ?? "Failed to send");
         }
@@ -1064,6 +1068,14 @@ export default function ChatPage() {
           )}
           {/* Bottom input bar: always visible */}
           <div className="shrink-0 p-3 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
+            {hasApiKeys === false && (
+              <div className="flex items-center justify-between rounded-lg bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+                <span>Add an API key to start chatting.</span>
+                <a href="/settings/api-keys" className="ml-3 font-medium underline underline-offset-2 whitespace-nowrap">
+                  Settings →
+                </a>
+              </div>
+            )}
             {/* Message box: full width */}
             <div className="relative">
               <textarea
